@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import TypeAlias
+
+import xarray as xr
+
+ArrayLike: TypeAlias = xr.DataArray | xr.Dataset
+
+CLIMATOLOGICAL_SEASONS: dict[str, tuple[int, ...]] = {
+    "DJF": (12, 1, 2),
+    "MAM": (3, 4, 5),
+    "JJA": (6, 7, 8),
+    "SON": (9, 10, 11),
+}
+
+
+def aggregate_annual(
+    data: ArrayLike,
+    time_dim: str = "time",
+) -> ArrayLike:
+    """Aggregate monthly data into annual means."""
+
+    _validate_time_dim(data=data, time_dim=time_dim)
+    return data.groupby(f"{time_dim}.year").mean(dim=time_dim)
+
+
+def aggregate_seasonal(
+    data: ArrayLike,
+    seasons: Mapping[str, Sequence[int]] | None = None,
+    time_dim: str = "time",
+) -> ArrayLike:
+    """Aggregate monthly data into season-by-year means."""
+
+    _validate_time_dim(data=data, time_dim=time_dim)
+    season_definitions = seasons or CLIMATOLOGICAL_SEASONS
+    season_names = list(season_definitions)
+    seasonal_arrays = [
+        _aggregate_single_season(
+            data=data,
+            season=season,
+            months=months,
+            time_dim=time_dim,
+        )
+        for season, months in season_definitions.items()
+    ]
+    available = [array for array in seasonal_arrays if array is not None]
+    if not available:
+        raise ValueError("no season definitions selected any months")
+
+    combined = xr.concat(available, dim="season")
+    return combined.reindex(season=season_names)
+
+
+def _validate_time_dim(data: ArrayLike, time_dim: str) -> None:
+    if time_dim not in data.dims:
+        raise ValueError(f"{time_dim!r} is not a dimension of the input data")
+
+
+def _aggregate_single_season(
+    data: ArrayLike,
+    season: str,
+    months: Sequence[int],
+    time_dim: str,
+) -> ArrayLike | None:
+    month = data[time_dim].dt.month
+    selected = data.where(month.isin(months), drop=True)
+    if selected.sizes.get(time_dim, 0) == 0:
+        return None
+
+    year = selected[time_dim].dt.year
+    if 12 in months and any(month_ < 12 for month_ in months):
+        year = year + xr.where(selected[time_dim].dt.month == 12, 1, 0)
+
+    return selected.groupby(year.rename("year")).mean(dim=time_dim).expand_dims(season=[season])
