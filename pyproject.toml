@@ -1,0 +1,11 @@
+[project]
+name = "impacts"
+version = "0.1.0"
+description = "Thermo-electric power mapping utilities for climate-impact workflows."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow>=16.0",
+    "xarray>=2024.6.0",
+]
