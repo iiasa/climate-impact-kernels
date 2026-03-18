@@ -6,9 +6,14 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import xarray as xr
-from climateresponse import aggregate_seasonal
-
-from thermo_electric_power.climate import attach_gridded_dataset
+from climateresponse import (
+    EvaluationResult,
+    aggregate_seasonal,
+    evaluate_mapped_dataset,
+    normalize_temperature,
+    resolve_unit,
+)
+from thermo_electric_power._cooling_common import join_country_from_cooling, validate_unique_units
 
 REQUIRED_DRY_COOLING_VARIABLES = frozenset({"air_temperature_k"})
 
@@ -36,6 +41,21 @@ REQUIRED_COOLING_JOIN_COLUMNS = frozenset(
         "cooling_category",
         "cooling_physics",
     }
+)
+
+DRY_METADATA_COLUMNS = (
+    "UNITID",
+    "LOCATIONID",
+    "country",
+    "fuel",
+    "utype",
+    "technology_family",
+    "mw",
+    "cooling_category",
+    "cooling_physics",
+    "dry_cooling_engine_type",
+    "dry_cooling_supported",
+    "dry_cooling_support_reason",
 )
 
 SUPPORTED_DRY_COOLING_ENGINE_TYPES = frozenset(
@@ -104,9 +124,10 @@ def normalize_dry_cooling_climate_inputs(
     normalized = dataset[list(variables.values())].rename(
         {source_name: target_name for target_name, source_name in variables.items()}
     )
-    normalized["air_temperature_k"] = _normalize_temperature_kelvin(
+    normalized["air_temperature_k"] = normalize_temperature(
         normalized["air_temperature_k"],
-        unit=_resolve_unit(normalized["air_temperature_k"], variable_units=variable_units),
+        target_unit="K",
+        unit=resolve_unit(normalized["air_temperature_k"], variable_units=variable_units),
     )
     return normalized
 
@@ -152,10 +173,10 @@ def build_dry_cooling_mapping(
         missing_list = ", ".join(sorted(missing_cooling))
         raise ValueError(f"cooling_mapping missing required columns: {missing_list}")
 
-    _validate_unique_units(unit_cell_mapping, frame_name="unit_cell_mapping")
-    _validate_unique_units(cooling_mapping, frame_name="cooling_mapping")
+    validate_unique_units(unit_cell_mapping, frame_name="unit_cell_mapping")
+    validate_unique_units(cooling_mapping, frame_name="cooling_mapping")
 
-    joined = _join_country_from_cooling(unit_cell_mapping, cooling_mapping).merge(
+    joined = join_country_from_cooling(unit_cell_mapping, cooling_mapping).merge(
         cooling_mapping[
             [
                 "UNITID",
@@ -202,23 +223,12 @@ def attach_dry_cooling_climate(
 ) -> xr.Dataset:
     """Attach normalized dry-cooling climate series to plant-level mappings."""
 
-    return attach_gridded_dataset(
+    return evaluate_mapped_dataset(
         dry_cooling_mapping,
         climate_inputs,
-        metadata_columns=[
-            "UNITID",
-            "LOCATIONID",
-            "country",
-            "fuel",
-            "utype",
-            "technology_family",
-            "mw",
-            "cooling_category",
-            "cooling_physics",
-            "dry_cooling_engine_type",
-            "dry_cooling_supported",
-            "dry_cooling_support_reason",
-        ],
+        normalize_inputs=lambda dataset: dataset,
+        physics_kernel=lambda attached: attached,
+        metadata_columns=DRY_METADATA_COLUMNS,
     )
 
 
@@ -231,9 +241,35 @@ def compute_monthly_dry_cooling_impacts(
     """Compute plant-level monthly dry-cooling capacity outcomes."""
 
     params = assumptions or DryCoolingAssumptions()
-    normalized_inputs = normalize_dry_cooling_climate_inputs(climate_inputs)
-    attached = attach_dry_cooling_climate(dry_cooling_mapping, normalized_inputs)
+    return evaluate_mapped_dataset(
+        dry_cooling_mapping,
+        climate_inputs,
+        normalize_inputs=normalize_dry_cooling_climate_inputs,
+        physics_kernel=lambda attached: _evaluate_dry_cooling_kernel(attached, params=params),
+        metadata_columns=DRY_METADATA_COLUMNS,
+        clips={
+            "efficiency_loss": (0.0, None),
+            "parasitic_load": (0.0, None),
+            "capacity_factor": (0.0, 1.0),
+            "capacity_loss": (0.0, 1.0),
+        },
+    )
 
+
+def aggregate_seasonal_dry_cooling_impacts(
+    monthly_impacts: xr.Dataset,
+    *,
+    seasons: Mapping[str, tuple[int, ...]] | None = None,
+) -> xr.Dataset:
+    """Aggregate monthly dry-cooling outputs into seasonal means."""
+
+    return aggregate_seasonal(monthly_impacts, seasons=seasons)
+
+def _evaluate_dry_cooling_kernel(
+    attached: xr.Dataset,
+    *,
+    params: DryCoolingAssumptions,
+) -> EvaluationResult:
     engine_type = attached.coords["dry_cooling_engine_type"]
     supported = attached.coords["dry_cooling_supported"]
     air_temperature = attached["air_temperature_k"]
@@ -268,28 +304,24 @@ def compute_monthly_dry_cooling_impacts(
                 0.0,
             ),
         ),
-    )
+    ).rename("parasitic_load")
 
     capacity_factor = xr.where(
         supported,
         1.0 - efficiency_loss - parasitic_load,
         params.unsupported_capacity_factor,
     ).clip(min=0.0, max=1.0)
-    capacity_loss = (1.0 - capacity_factor).rename("capacity_loss")
-    usable_capacity = (capacity_factor * attached.coords["mw"]).rename("usable_capacity_mw")
-    backpressure = _compute_backpressure(air_temperature).rename("backpressure_inhg")
 
-    monthly = xr.Dataset(
+    return EvaluationResult(
         data_vars={
             "air_temperature_k": air_temperature,
-            "backpressure_inhg": backpressure,
+            "backpressure_inhg": _compute_backpressure(air_temperature).rename("backpressure_inhg"),
             "efficiency_loss": efficiency_loss.rename("efficiency_loss"),
-            "parasitic_load": parasitic_load.rename("parasitic_load"),
+            "parasitic_load": parasitic_load,
             "capacity_factor": capacity_factor.rename("capacity_factor"),
-            "capacity_loss": capacity_loss,
-            "usable_capacity_mw": usable_capacity,
+            "capacity_loss": (1.0 - capacity_factor).rename("capacity_loss"),
+            "usable_capacity_mw": (capacity_factor * attached.coords["mw"]).rename("usable_capacity_mw"),
         },
-        coords=attached.coords,
         attrs={
             "combustible_steam_parasitic_load_fraction": (
                 params.combustible_steam_parasitic_load_fraction
@@ -302,64 +334,6 @@ def compute_monthly_dry_cooling_impacts(
             "unsupported_handling": "Units without a Qin steam-cycle family keep capacity_factor=1.0.",
         },
     )
-    return monthly.transpose("time", "entity")
-
-
-def aggregate_seasonal_dry_cooling_impacts(
-    monthly_impacts: xr.Dataset,
-    *,
-    seasons: Mapping[str, tuple[int, ...]] | None = None,
-) -> xr.Dataset:
-    """Aggregate monthly dry-cooling outputs into seasonal means."""
-
-    return aggregate_seasonal(monthly_impacts, seasons=seasons)
-
-
-def _validate_unique_units(frame: pd.DataFrame, *, frame_name: str) -> None:
-    duplicates = frame["UNITID"].duplicated(keep=False)
-    if duplicates.any():
-        duplicate_units = frame.loc[duplicates, "UNITID"].tolist()[:5]
-        raise ValueError(f"{frame_name} must have unique UNITID values; duplicates include {duplicate_units}")
-
-
-def _join_country_from_cooling(
-    unit_cell_mapping: pd.DataFrame,
-    cooling_mapping: pd.DataFrame,
-) -> pd.DataFrame:
-    if "country" in unit_cell_mapping.columns:
-        return unit_cell_mapping
-    if "country" not in cooling_mapping.columns:
-        raise ValueError("country must be present in unit_cell_mapping or cooling_mapping")
-    return unit_cell_mapping.merge(
-        cooling_mapping[["UNITID", "LOCATIONID", "country"]],
-        on=["UNITID", "LOCATIONID"],
-        how="left",
-        validate="one_to_one",
-    )
-
-
-def _resolve_unit(
-    data: xr.DataArray,
-    *,
-    variable_units: Mapping[str, str] | None,
-) -> str:
-    explicit_unit = None if variable_units is None else variable_units.get(str(data.name))
-    unit = explicit_unit or data.attrs.get("units")
-    if unit is None:
-        raise ValueError(f"{data.name!r} is missing units metadata; pass variable_units explicitly")
-    return str(unit).strip()
-
-
-def _normalize_temperature_kelvin(data: xr.DataArray, *, unit: str) -> xr.DataArray:
-    normalized_unit = unit.lower()
-    if normalized_unit in {"k", "kelvin"}:
-        return data
-    if normalized_unit in {"c", "degc", "degree_celsius", "degrees_celsius", "celsius"}:
-        converted = data + 273.15
-        converted.attrs = data.attrs
-        converted.attrs["units"] = "K"
-        return converted
-    raise ValueError(f"unsupported temperature unit for {data.name!r}: {unit}")
 
 
 def _classify_fuel_group(fuel: str) -> str:

@@ -6,9 +6,15 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import xarray as xr
-from climateresponse import aggregate_seasonal
-
-from thermo_electric_power.climate import attach_gridded_dataset
+from climateresponse import (
+    EvaluationResult,
+    aggregate_seasonal,
+    evaluate_mapped_dataset,
+    normalize_pressure,
+    normalize_temperature,
+    resolve_unit,
+)
+from thermo_electric_power._cooling_common import join_country_from_cooling, validate_unique_units
 
 REQUIRED_WET_COOLING_VARIABLES = frozenset(
     {
@@ -48,6 +54,15 @@ REQUIRED_COOLING_JOIN_COLUMNS = frozenset(
     }
 )
 
+WET_METADATA_COLUMNS = (
+    "UNITID",
+    "LOCATIONID",
+    "country",
+    "mw",
+    "cooling_category",
+    "cooling_physics",
+)
+
 
 @dataclass(frozen=True)
 class WetCoolingAssumptions:
@@ -84,17 +99,20 @@ def normalize_wet_cooling_climate_inputs(
     normalized = dataset[list(variables.values())].rename(
         {source_name: target_name for target_name, source_name in variables.items()}
     )
-    normalized["water_temperature"] = _normalize_temperature(
+    normalized["water_temperature"] = normalize_temperature(
         normalized["water_temperature"],
-        unit=_resolve_unit(normalized["water_temperature"], variable_units=variable_units),
+        target_unit="C",
+        unit=resolve_unit(normalized["water_temperature"], variable_units=variable_units),
     )
-    normalized["air_temperature"] = _normalize_temperature(
+    normalized["air_temperature"] = normalize_temperature(
         normalized["air_temperature"],
-        unit=_resolve_unit(normalized["air_temperature"], variable_units=variable_units),
+        target_unit="C",
+        unit=resolve_unit(normalized["air_temperature"], variable_units=variable_units),
     )
-    normalized["surface_pressure"] = _normalize_pressure(
+    normalized["surface_pressure"] = normalize_pressure(
         normalized["surface_pressure"],
-        unit=_resolve_unit(normalized["surface_pressure"], variable_units=variable_units),
+        target_unit="kPa",
+        unit=resolve_unit(normalized["surface_pressure"], variable_units=variable_units),
     )
     return normalized
 
@@ -115,10 +133,10 @@ def build_wet_cooling_mapping(
         missing_list = ", ".join(sorted(missing_cooling))
         raise ValueError(f"cooling_mapping missing required columns: {missing_list}")
 
-    _validate_unique_units(unit_cell_mapping, frame_name="unit_cell_mapping")
-    _validate_unique_units(cooling_mapping, frame_name="cooling_mapping")
+    validate_unique_units(unit_cell_mapping, frame_name="unit_cell_mapping")
+    validate_unique_units(cooling_mapping, frame_name="cooling_mapping")
 
-    joined = _join_country_from_cooling(unit_cell_mapping, cooling_mapping).merge(
+    joined = join_country_from_cooling(unit_cell_mapping, cooling_mapping).merge(
         cooling_mapping[
             [column for column in ["UNITID", "LOCATIONID", "cooling_category", "cooling_physics", "requires_water"]]
         ],
@@ -142,17 +160,12 @@ def attach_wet_cooling_climate(
 ) -> xr.Dataset:
     """Attach normalized wet-cooling climate series to plant-level mappings."""
 
-    return attach_gridded_dataset(
+    return evaluate_mapped_dataset(
         wet_cooling_mapping,
         climate_inputs,
-        metadata_columns=[
-            "UNITID",
-            "LOCATIONID",
-            "country",
-            "mw",
-            "cooling_category",
-            "cooling_physics",
-        ],
+        normalize_inputs=lambda dataset: dataset,
+        physics_kernel=lambda attached: attached,
+        metadata_columns=WET_METADATA_COLUMNS,
     )
 
 
@@ -165,22 +178,45 @@ def compute_monthly_wet_cooling_impacts(
     """Compute plant-level monthly wet-cooling capacity outcomes."""
 
     params = assumptions or WetCoolingAssumptions()
-    normalized_inputs = normalize_wet_cooling_climate_inputs(climate_inputs)
-    attached = attach_wet_cooling_climate(wet_cooling_mapping, normalized_inputs)
+    return evaluate_mapped_dataset(
+        wet_cooling_mapping,
+        climate_inputs,
+        normalize_inputs=normalize_wet_cooling_climate_inputs,
+        physics_kernel=lambda attached: _evaluate_wet_cooling_kernel(attached, params=params),
+        metadata_columns=WET_METADATA_COLUMNS,
+        clips={
+            "capacity_factor": (0.0, 1.0),
+            "capacity_loss": (0.0, 1.0),
+        },
+    )
 
+
+def aggregate_seasonal_wet_cooling_impacts(
+    monthly_impacts: xr.Dataset,
+    *,
+    seasons: Mapping[str, tuple[int, ...]] | None = None,
+) -> xr.Dataset:
+    """Aggregate monthly wet-cooling outputs into seasonal means."""
+
+    return aggregate_seasonal(monthly_impacts, seasons=seasons)
+
+def _evaluate_wet_cooling_kernel(
+    attached: xr.Dataset,
+    *,
+    params: WetCoolingAssumptions,
+) -> EvaluationResult:
     once_through_capacity = _once_through_capacity_factor(attached, params=params)
     recirculating_capacity = _recirculating_capacity_factor(attached, params=params)
     physics = attached.coords["cooling_physics"]
     capacity_factor = xr.where(physics == "once_through", once_through_capacity, recirculating_capacity)
     capacity_factor = capacity_factor.clip(min=0.0, max=1.0).rename("capacity_factor")
     capacity_loss = (1.0 - capacity_factor).rename("capacity_loss")
-    usable_capacity = (capacity_factor * attached.coords["mw"]).rename("usable_capacity_mw")
     wet_bulb = _compute_wet_bulb_temperature(
         air_temperature_c=attached["air_temperature"],
         relative_humidity=attached["relative_humidity"],
     ).rename("wet_bulb_temperature")
 
-    monthly = xr.Dataset(
+    return EvaluationResult(
         data_vars={
             "water_temperature": attached["water_temperature"],
             "discharge": attached["discharge"],
@@ -190,9 +226,8 @@ def compute_monthly_wet_cooling_impacts(
             "wet_bulb_temperature": wet_bulb,
             "capacity_factor": capacity_factor,
             "capacity_loss": capacity_loss,
-            "usable_capacity_mw": usable_capacity,
+            "usable_capacity_mw": (capacity_factor * attached.coords["mw"]).rename("usable_capacity_mw"),
         },
-        coords=attached.coords,
         attrs={
             "once_through_design_intake_temp_c": params.once_through_design_intake_temp_c,
             "once_through_condenser_delta_c": params.once_through_condenser_delta_c,
@@ -207,76 +242,6 @@ def compute_monthly_wet_cooling_impacts(
             "recirculating_penalty_per_kpa": params.recirculating_penalty_per_kpa,
         },
     )
-    return monthly.transpose("time", "entity")
-
-
-def aggregate_seasonal_wet_cooling_impacts(
-    monthly_impacts: xr.Dataset,
-    *,
-    seasons: Mapping[str, tuple[int, ...]] | None = None,
-) -> xr.Dataset:
-    """Aggregate monthly wet-cooling outputs into seasonal means."""
-
-    return aggregate_seasonal(monthly_impacts, seasons=seasons)
-
-
-def _validate_unique_units(frame: pd.DataFrame, *, frame_name: str) -> None:
-    duplicates = frame["UNITID"].duplicated(keep=False)
-    if duplicates.any():
-        duplicate_units = frame.loc[duplicates, "UNITID"].tolist()[:5]
-        raise ValueError(f"{frame_name} must have unique UNITID values; duplicates include {duplicate_units}")
-
-
-def _join_country_from_cooling(
-    unit_cell_mapping: pd.DataFrame,
-    cooling_mapping: pd.DataFrame,
-) -> pd.DataFrame:
-    if "country" in unit_cell_mapping.columns:
-        return unit_cell_mapping
-    if "country" not in cooling_mapping.columns:
-        raise ValueError("country must be present in unit_cell_mapping or cooling_mapping")
-    return unit_cell_mapping.merge(
-        cooling_mapping[["UNITID", "LOCATIONID", "country"]],
-        on=["UNITID", "LOCATIONID"],
-        how="left",
-        validate="one_to_one",
-    )
-
-
-def _resolve_unit(
-    data: xr.DataArray,
-    *,
-    variable_units: Mapping[str, str] | None,
-) -> str:
-    explicit_unit = None if variable_units is None else variable_units.get(str(data.name))
-    unit = explicit_unit or data.attrs.get("units")
-    if unit is None:
-        raise ValueError(f"{data.name!r} is missing units metadata; pass variable_units explicitly")
-    return str(unit).strip()
-
-
-def _normalize_temperature(data: xr.DataArray, *, unit: str) -> xr.DataArray:
-    normalized_unit = unit.lower()
-    if normalized_unit in {"k", "kelvin"}:
-        converted = data - 273.15
-        converted.attrs = data.attrs
-        converted.attrs["units"] = "C"
-        return converted
-    if normalized_unit in {"c", "degc", "degree_celsius", "degrees_celsius", "celsius"}:
-        return data
-    raise ValueError(f"unsupported temperature unit for {data.name!r}: {unit}")
-
-
-def _normalize_pressure(data: xr.DataArray, *, unit: str) -> xr.DataArray:
-    normalized_unit = unit.lower()
-    if normalized_unit in {"pa", "pascal", "pascals"}:
-        converted = data / 1_000.0
-        converted.attrs = data.attrs
-        converted.attrs["units"] = "kPa"
-        return converted
-    if normalized_unit in {"kpa", "kilopascal", "kilopascals"}:
-        return data
-    raise ValueError(f"unsupported pressure unit for {data.name!r}: {unit}")
 
 
 def _once_through_capacity_factor(
