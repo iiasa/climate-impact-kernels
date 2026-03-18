@@ -5,7 +5,14 @@ description = "Thermo-electric power mapping utilities for climate-impact workfl
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "climateresponse",
     "pandas>=2.2",
     "pyarrow>=16.0",
     "xarray>=2024.6.0",
 ]
+
+[tool.uv.sources]
+climateresponse = { path = "/home/raghunathan/climateresponse", editable = true }
+
+[tool.setuptools.packages.find]
+include = ["thermo_electric_power*"]

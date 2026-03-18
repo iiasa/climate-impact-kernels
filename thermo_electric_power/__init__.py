@@ -27,6 +27,16 @@ from thermo_electric_power.mapping import (
     write_recovered_unit_cell_mapping,
     write_unit_cell_mapping,
 )
+from thermo_electric_power.wet_cooling import (
+    DEFAULT_ISIMIP_VARIABLE_NAMES,
+    REQUIRED_WET_COOLING_VARIABLES,
+    WetCoolingAssumptions,
+    aggregate_seasonal_wet_cooling_impacts,
+    attach_wet_cooling_climate,
+    build_wet_cooling_mapping,
+    compute_monthly_wet_cooling_impacts,
+    normalize_wet_cooling_climate_inputs,
+)
 
 __all__ = [
     "attach_gridded_dataarray",
@@ -44,10 +54,18 @@ __all__ = [
     "build_location_cell_mapping",
     "build_recovered_unit_cell_mapping",
     "build_unit_cell_mapping",
+    "build_wet_cooling_mapping",
     "load_and_map_thermal_plants",
     "snap_to_half_degree_cell",
     "summarize_location_ambiguity",
     "summarize_mapping",
+    "DEFAULT_ISIMIP_VARIABLE_NAMES",
+    "REQUIRED_WET_COOLING_VARIABLES",
+    "WetCoolingAssumptions",
+    "attach_wet_cooling_climate",
+    "normalize_wet_cooling_climate_inputs",
+    "compute_monthly_wet_cooling_impacts",
+    "aggregate_seasonal_wet_cooling_impacts",
     "write_unit_cooling_mapping",
     "write_country_rollup",
     "write_location_cell_mapping",

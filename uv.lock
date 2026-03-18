@@ -11,10 +11,26 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "climateresponse"
+version = "0.1.0"
+source = { editable = "../climateresponse" }
+dependencies = [
+    { name = "numpy" },
+    { name = "xarray" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy" },
+    { name = "xarray" },
+]
+
+[[package]]
 name = "impacts"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "climateresponse" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "xarray" },
@@ -22,6 +38,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "climateresponse", editable = "../climateresponse" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pyarrow", specifier = ">=16.0" },
     { name = "xarray", specifier = ">=2024.6.0" },
