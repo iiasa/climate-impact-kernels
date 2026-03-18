@@ -32,7 +32,6 @@ REQUIRED_WET_MAPPING_COLUMNS = frozenset(
     {
         "UNITID",
         "LOCATIONID",
-        "country",
         "grid_lat",
         "grid_lon",
         "mw",
@@ -69,6 +68,7 @@ def normalize_wet_cooling_climate_inputs(
     dataset: xr.Dataset,
     *,
     variable_names: Mapping[str, str] | None = None,
+    variable_units: Mapping[str, str] | None = None,
 ) -> xr.Dataset:
     """Select, rename, and normalize the climate inputs required by wet-cooling physics."""
 
@@ -84,9 +84,18 @@ def normalize_wet_cooling_climate_inputs(
     normalized = dataset[list(variables.values())].rename(
         {source_name: target_name for target_name, source_name in variables.items()}
     )
-    normalized["water_temperature"] = _normalize_temperature(normalized["water_temperature"])
-    normalized["air_temperature"] = _normalize_temperature(normalized["air_temperature"])
-    normalized["surface_pressure"] = _normalize_pressure(normalized["surface_pressure"])
+    normalized["water_temperature"] = _normalize_temperature(
+        normalized["water_temperature"],
+        unit=_resolve_unit(normalized["water_temperature"], variable_units=variable_units),
+    )
+    normalized["air_temperature"] = _normalize_temperature(
+        normalized["air_temperature"],
+        unit=_resolve_unit(normalized["air_temperature"], variable_units=variable_units),
+    )
+    normalized["surface_pressure"] = _normalize_pressure(
+        normalized["surface_pressure"],
+        unit=_resolve_unit(normalized["surface_pressure"], variable_units=variable_units),
+    )
     return normalized
 
 
@@ -109,15 +118,9 @@ def build_wet_cooling_mapping(
     _validate_unique_units(unit_cell_mapping, frame_name="unit_cell_mapping")
     _validate_unique_units(cooling_mapping, frame_name="cooling_mapping")
 
-    joined = unit_cell_mapping.merge(
+    joined = _join_country_from_cooling(unit_cell_mapping, cooling_mapping).merge(
         cooling_mapping[
-            [
-                "UNITID",
-                "LOCATIONID",
-                "cooling_category",
-                "cooling_physics",
-                "requires_water",
-            ]
+            [column for column in ["UNITID", "LOCATIONID", "cooling_category", "cooling_physics", "requires_water"]]
         ],
         on=["UNITID", "LOCATIONID"],
         how="inner",
@@ -224,16 +227,56 @@ def _validate_unique_units(frame: pd.DataFrame, *, frame_name: str) -> None:
         raise ValueError(f"{frame_name} must have unique UNITID values; duplicates include {duplicate_units}")
 
 
-def _normalize_temperature(data: xr.DataArray) -> xr.DataArray:
-    if float(data.max().item()) > 200.0:
-        return data - 273.15
-    return data
+def _join_country_from_cooling(
+    unit_cell_mapping: pd.DataFrame,
+    cooling_mapping: pd.DataFrame,
+) -> pd.DataFrame:
+    if "country" in unit_cell_mapping.columns:
+        return unit_cell_mapping
+    if "country" not in cooling_mapping.columns:
+        raise ValueError("country must be present in unit_cell_mapping or cooling_mapping")
+    return unit_cell_mapping.merge(
+        cooling_mapping[["UNITID", "LOCATIONID", "country"]],
+        on=["UNITID", "LOCATIONID"],
+        how="left",
+        validate="one_to_one",
+    )
 
 
-def _normalize_pressure(data: xr.DataArray) -> xr.DataArray:
-    if float(data.max().item()) > 2_000.0:
-        return data / 1_000.0
-    return data
+def _resolve_unit(
+    data: xr.DataArray,
+    *,
+    variable_units: Mapping[str, str] | None,
+) -> str:
+    explicit_unit = None if variable_units is None else variable_units.get(str(data.name))
+    unit = explicit_unit or data.attrs.get("units")
+    if unit is None:
+        raise ValueError(f"{data.name!r} is missing units metadata; pass variable_units explicitly")
+    return str(unit).strip()
+
+
+def _normalize_temperature(data: xr.DataArray, *, unit: str) -> xr.DataArray:
+    normalized_unit = unit.lower()
+    if normalized_unit in {"k", "kelvin"}:
+        converted = data - 273.15
+        converted.attrs = data.attrs
+        converted.attrs["units"] = "C"
+        return converted
+    if normalized_unit in {"c", "degc", "degree_celsius", "degrees_celsius", "celsius"}:
+        return data
+    raise ValueError(f"unsupported temperature unit for {data.name!r}: {unit}")
+
+
+def _normalize_pressure(data: xr.DataArray, *, unit: str) -> xr.DataArray:
+    normalized_unit = unit.lower()
+    if normalized_unit in {"pa", "pascal", "pascals"}:
+        converted = data / 1_000.0
+        converted.attrs = data.attrs
+        converted.attrs["units"] = "kPa"
+        return converted
+    if normalized_unit in {"kpa", "kilopascal", "kilopascals"}:
+        return data
+    raise ValueError(f"unsupported pressure unit for {data.name!r}: {unit}")
 
 
 def _once_through_capacity_factor(

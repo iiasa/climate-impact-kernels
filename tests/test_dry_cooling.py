@@ -19,7 +19,6 @@ class DryCoolingContractTest(unittest.TestCase):
             {
                 "UNITID": [101, 202, 303, 404],
                 "LOCATIONID": [10, 20, 30, 40],
-                "country": ["Taiwan", "Korea", "USA", "France"],
                 "grid_lat": [23.25, 37.25, 41.25, 48.25],
                 "grid_lon": [121.25, 127.25, -87.25, 2.25],
                 "mw": [100.0, 200.0, 80.0, 900.0],
@@ -29,6 +28,7 @@ class DryCoolingContractTest(unittest.TestCase):
             {
                 "UNITID": [101, 202, 303, 404, 505],
                 "LOCATIONID": [10, 20, 30, 40, 50],
+                "country": ["Taiwan", "Korea", "USA", "France", "Canada"],
                 "fuel": ["COAL", "LNG", "DIESEL", "NUCLEAR", "COAL"],
                 "utype": ["ST", "GT/C", "GT", "ST", "ST"],
                 "technology_family": [
@@ -74,6 +74,7 @@ class DryCoolingContractTest(unittest.TestCase):
                 "lon": [-87.25, 2.25, 121.25, 127.25],
             },
         )
+        self.climate["tas"].attrs["units"] = "C"
 
     def test_normalize_dry_cooling_inputs_renames_and_converts_units(self) -> None:
         normalized = normalize_dry_cooling_climate_inputs(self.climate)
@@ -99,6 +100,11 @@ class DryCoolingContractTest(unittest.TestCase):
                 "excluded_no_steam_cycle",
             ],
         )
+
+    def test_build_dry_cooling_mapping_accepts_artifact_schema_without_country(self) -> None:
+        mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
+
+        self.assertEqual(mapping["country"].tolist(), ["France", "Korea", "Taiwan", "USA"])
 
     def test_compute_monthly_dry_cooling_impacts_returns_capacity_outputs(self) -> None:
         mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)

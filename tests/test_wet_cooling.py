@@ -29,6 +29,7 @@ class WetCoolingContractTest(unittest.TestCase):
             {
                 "UNITID": [101, 202, 303],
                 "LOCATIONID": [10, 20, 30],
+                "country": ["Taiwan", "Korea", "USA"],
                 "cooling_category": ["ot_fresh", "cl_fresh", "air"],
                 "cooling_physics": ["once_through", "recirculating", "dry"],
                 "requires_water": [True, True, False],
@@ -83,6 +84,9 @@ class WetCoolingContractTest(unittest.TestCase):
                 "lon": [121.25, 127.25],
             },
         )
+        self.climate["tw"].attrs["units"] = "K"
+        self.climate["tas"].attrs["units"] = "K"
+        self.climate["ps"].attrs["units"] = "Pa"
 
     def test_normalize_wet_cooling_inputs_renames_and_converts_units(self) -> None:
         normalized = normalize_wet_cooling_climate_inputs(self.climate)
@@ -111,6 +115,14 @@ class WetCoolingContractTest(unittest.TestCase):
 
         self.assertEqual(mapping["UNITID"].tolist(), [202, 101])
         self.assertEqual(mapping["cooling_physics"].tolist(), ["recirculating", "once_through"])
+
+    def test_build_wet_cooling_mapping_accepts_artifact_schema_without_country(self) -> None:
+        mapping = build_wet_cooling_mapping(
+            self.unit_cell_mapping.drop(columns=["country"]),
+            self.cooling_mapping,
+        )
+
+        self.assertEqual(mapping["country"].tolist(), ["Korea", "Taiwan"])
 
     def test_compute_monthly_wet_cooling_impacts_returns_capacity_outputs(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
