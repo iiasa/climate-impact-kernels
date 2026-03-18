@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 
 import pandas as pd
@@ -126,6 +127,25 @@ class DryCoolingContractTest(unittest.TestCase):
             monthly["usable_capacity_mw"].sel(time="2001-01-01", entity=303).item(),
             80.0,
         )
+        self.assertAlmostEqual(
+            monthly["parasitic_load"].sel(entity=404).item(),
+            0.0304,
+        )
+        self.assertAlmostEqual(
+            monthly["parasitic_load"].sel(entity=404).item(),
+            monthly.attrs["nuclear_steam_parasitic_load_fraction"],
+        )
+        nuclear_air_temperature_k = monthly["air_temperature_k"].sel(time="2001-01-01", entity=404).item()
+        expected_backpressure = 1.031 * math.exp(
+            0.019 * ((nuclear_air_temperature_k - 273.15) * 9.0 / 5.0 + 32.0)
+        )
+        self.assertAlmostEqual(
+            monthly["backpressure_inhg"].sel(time="2001-01-01", entity=404).item(),
+            expected_backpressure,
+            places=6,
+        )
+        self.assertIn("Fahrenheit", monthly.attrs["backpressure_source_note"])
+        self.assertIn("3.04%", monthly.attrs["parasitic_load_source_note"])
 
     def test_aggregate_seasonal_dry_cooling_impacts_uses_climateresponse(self) -> None:
         mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)

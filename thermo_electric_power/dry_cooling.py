@@ -101,6 +101,7 @@ class DryCoolingAssumptions:
     combustible_steam_parasitic_load_fraction: float = 0.0243
     combined_cycle_parasitic_load_fraction: float = 0.0081
     non_combustible_steam_parasitic_load_fraction: float = 0.0056
+    nuclear_steam_parasitic_load_fraction: float = 0.0304
     unsupported_capacity_factor: float = 1.0
 
 
@@ -265,6 +266,7 @@ def aggregate_seasonal_dry_cooling_impacts(
 
     return aggregate_seasonal(monthly_impacts, seasons=seasons)
 
+
 def _evaluate_dry_cooling_kernel(
     attached: xr.Dataset,
     *,
@@ -299,9 +301,13 @@ def _evaluate_dry_cooling_kernel(
             engine_type == "combined_cycle",
             params.combined_cycle_parasitic_load_fraction,
             xr.where(
-                engine_type.isin(["nuclear_steam", "non_combustible_steam"]),
-                params.non_combustible_steam_parasitic_load_fraction,
-                0.0,
+                engine_type == "nuclear_steam",
+                params.nuclear_steam_parasitic_load_fraction,
+                xr.where(
+                    engine_type == "non_combustible_steam",
+                    params.non_combustible_steam_parasitic_load_fraction,
+                    0.0,
+                ),
             ),
         ),
     ).rename("parasitic_load")
@@ -330,7 +336,15 @@ def _evaluate_dry_cooling_kernel(
             "non_combustible_steam_parasitic_load_fraction": (
                 params.non_combustible_steam_parasitic_load_fraction
             ),
+            "nuclear_steam_parasitic_load_fraction": params.nuclear_steam_parasitic_load_fraction,
             "unsupported_capacity_factor": params.unsupported_capacity_factor,
+            "backpressure_source_note": (
+                "EPA 2001 condenser backpressure fit evaluated with condenser inlet temperature in Fahrenheit."
+            ),
+            "parasitic_load_source_note": (
+                "Nuclear dry-tower fan penalty uses EPA 2001 Table 3-19 (3.04%); "
+                "non-combustible steam retains the Qin reproduced-table value (0.56%)."
+            ),
             "unsupported_handling": "Units without a Qin steam-cycle family keep capacity_factor=1.0.",
         },
     )
@@ -348,7 +362,8 @@ def _classify_fuel_group(fuel: str) -> str:
 
 
 def _compute_backpressure(air_temperature_k: xr.DataArray) -> xr.DataArray:
-    return 1.031 * xr.apply_ufunc(np.exp, 0.019 * air_temperature_k)
+    air_temperature_f = (air_temperature_k - 273.15) * 9.0 / 5.0 + 32.0
+    return 1.031 * xr.apply_ufunc(np.exp, 0.019 * air_temperature_f)
 
 
 def _combustible_steam_efficiency_loss(air_temperature_k: xr.DataArray) -> xr.DataArray:
