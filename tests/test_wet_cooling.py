@@ -6,7 +6,7 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from thermo_electric_power.wet_cooling import (
+from impacts.thermoelectric.wet_cooling import (
     WetCoolingAssumptions,
     aggregate_seasonal_wet_cooling_impacts,
     build_wet_cooling_mapping,

@@ -5,7 +5,7 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from thermo_electric_power.climate import attach_gridded_dataarray, attach_gridded_dataset
+from impacts.thermoelectric.climate import attach_gridded_dataarray, attach_gridded_dataset
 
 
 class ClimateJoinTest(unittest.TestCase):

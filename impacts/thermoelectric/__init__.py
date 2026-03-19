@@ -1,13 +1,13 @@
 """Thermo-electric power mapping utilities."""
 
-from thermo_electric_power.climate import attach_gridded_dataarray, attach_gridded_dataset
-from thermo_electric_power.cooling import (
+from impacts.thermoelectric.climate import attach_gridded_dataarray, attach_gridded_dataset
+from impacts.thermoelectric.cooling import (
     DEFAULT_COOLING_COLUMNS,
     build_unit_cooling_mapping,
     classify_technology_family,
     write_unit_cooling_mapping,
 )
-from thermo_electric_power.dry_cooling import (
+from impacts.thermoelectric.dry_cooling import (
     DEFAULT_DRY_COOLING_VARIABLE_NAMES,
     REQUIRED_DRY_COOLING_VARIABLES,
     DryCoolingAssumptions,
@@ -18,7 +18,7 @@ from thermo_electric_power.dry_cooling import (
     compute_monthly_dry_cooling_impacts,
     normalize_dry_cooling_climate_inputs,
 )
-from thermo_electric_power.mapping import (
+from impacts.thermoelectric.mapping import (
     CellMappingSummary,
     DEFAULT_COUNTRY_COLUMNS,
     DEFAULT_LOCATION_COLUMNS,
@@ -38,7 +38,7 @@ from thermo_electric_power.mapping import (
     write_recovered_unit_cell_mapping,
     write_unit_cell_mapping,
 )
-from thermo_electric_power.wet_cooling import (
+from impacts.thermoelectric.wet_cooling import (
     DEFAULT_ISIMIP_VARIABLE_NAMES,
     REQUIRED_WET_COOLING_VARIABLES,
     WetCoolingAssumptions,

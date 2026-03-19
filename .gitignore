@@ -9,6 +9,7 @@ wheels/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.claude/
 htmlcov/
 
 # Virtual environments

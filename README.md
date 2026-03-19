@@ -1,26 +1,32 @@
-`thermo_electric_power` holds the upstream contract artifacts needed before
-plant-level cooling physics can run against gridded climate and hydrology data.
-It is a library package with materialized data artifacts, not a pipeline CLI.
+`impacts` is organized as `impacts.<domain>`.
+
+Current domains:
+
+- `impacts.thermoelectric`
+- `impacts.landuse`
+
+The package is a library of domain contracts and transformations, not a
+pipeline CLI.
 
 ## Separation Of Concerns
 
-`impacts` owns plant-level contracts, plant-to-grid joins, and cooling physics.
-It does not open NetCDF files, discover datasets, or provide general xarray
-preprocessing helpers. Those array-native transforms belong in
-`climateresponse`, which is an explicit local dependency of this package.
+`impacts` owns domain contracts, joins, and impact equations. It does not open
+NetCDF files, discover datasets, or provide general xarray preprocessing
+helpers. Those array-native transforms belong in `climateresponse`, which is an
+explicit local dependency of this package.
 
 The intended boundary is:
 
 - `climateresponse`: reusable xarray transforms such as annual or seasonal
   aggregation once arrays are already loaded.
-- `impacts`: fleet mappings, cooling assignments, and plant-level impact
-  equations operating on already-opened arrays or tables.
+- `impacts`: domain-specific contracts and physics operating on already-opened
+  arrays or tables.
 
 If a reusable xarray manipulation step is missing for this workflow, add it to
 `climateresponse` first and then consume it here rather than reimplementing the
 helper inside `impacts`.
 
-Current artifacts:
+Current thermo-electric artifacts:
 
 - `data/unit_cell_mapping.parquet`
   Exact coordinate-only unit-to-cell mapping.

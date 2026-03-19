@@ -6,7 +6,7 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from thermo_electric_power.dry_cooling import (
+from impacts.thermoelectric.dry_cooling import (
     aggregate_seasonal_dry_cooling_impacts,
     build_dry_cooling_mapping,
     compute_monthly_dry_cooling_impacts,

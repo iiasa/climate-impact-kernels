@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from thermo_electric_power.mapping import (
+from impacts.thermoelectric.mapping import (
     build_recovered_unit_cell_mapping,
     write_recovered_unit_cell_mapping,
 )

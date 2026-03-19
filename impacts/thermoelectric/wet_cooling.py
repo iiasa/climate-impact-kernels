@@ -14,7 +14,10 @@ from climateresponse import (
     normalize_temperature,
     resolve_unit,
 )
-from thermo_electric_power._cooling_common import join_country_from_cooling, validate_unique_units
+from impacts.thermoelectric._cooling_common import (
+    join_country_from_cooling,
+    validate_unique_units,
+)
 
 REQUIRED_WET_COOLING_VARIABLES = frozenset(
     {

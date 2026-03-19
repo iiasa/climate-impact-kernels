@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from thermo_electric_power.cooling import (
+from impacts.thermoelectric.cooling import (
     build_unit_cooling_mapping,
     classify_technology_family,
     write_unit_cooling_mapping,
