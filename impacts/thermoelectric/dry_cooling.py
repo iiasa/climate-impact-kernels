@@ -355,7 +355,7 @@ def _evaluate_dry_cooling_kernel(
 
 def _classify_fuel_group(fuel: str) -> str:
     normalized = fuel.upper()
-    if "NUC" in normalized or "URANIUM" in normalized:
+    if "NUC" in normalized or "URANIUM" in normalized or normalized == "UR":
         return "nuclear"
     if any(marker in normalized for marker in NON_COMBUSTIBLE_FUEL_MARKERS):
         return "non_combustible"
