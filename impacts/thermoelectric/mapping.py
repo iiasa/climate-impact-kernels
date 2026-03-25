@@ -116,9 +116,11 @@ def build_unit_cell_mapping(thermal_plants: pd.DataFrame) -> pd.DataFrame:
     mapped["cell_id"] = (
         mapped["grid_lat"].map("{:.2f}".format) + "," + mapped["grid_lon"].map("{:.2f}".format)
     )
-    cell_counts = mapped.groupby("LOCATIONID").apply(
-        lambda frame: frame[["grid_lat", "grid_lon"]].drop_duplicates().shape[0],
-        include_groups=False,
+    cell_counts = (
+        mapped[["LOCATIONID", "grid_lat", "grid_lon"]]
+        .drop_duplicates()
+        .groupby("LOCATIONID")
+        .size()
     )
     mapped["location_cell_count"] = mapped["LOCATIONID"].map(cell_counts).astype("int64")
     mapped["location_is_single_cell"] = mapped["location_cell_count"].eq(1)

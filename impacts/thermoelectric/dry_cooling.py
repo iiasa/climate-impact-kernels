@@ -198,15 +198,19 @@ def build_dry_cooling_mapping(
     )
 
     dry = joined.loc[joined["cooling_physics"] == "dry"].copy()
-    engine_mapping = dry.apply(
-        lambda row: classify_dry_cooling_engine_type(
-            technology_family=row["technology_family"],
-            fuel=row["fuel"],
-        ),
-        axis=1,
-    )
+    engine_mapping = [
+        classify_dry_cooling_engine_type(
+            technology_family=technology_family,
+            fuel=fuel,
+        )
+        for technology_family, fuel in zip(
+            dry["technology_family"],
+            dry["fuel"],
+            strict=True,
+        )
+    ]
     engine_frame = pd.DataFrame(
-        engine_mapping.tolist(),
+        engine_mapping,
         columns=[
             "dry_cooling_engine_type",
             "dry_cooling_supported",

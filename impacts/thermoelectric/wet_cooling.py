@@ -198,17 +198,22 @@ def build_wet_cooling_mapping(
         unknown = sorted(wet.loc[~supported, "cooling_physics"].dropna().unique().tolist())
         raise ValueError(f"unsupported wet cooling physics: {unknown}")
 
-    wet["wet_fuel_type"] = wet.apply(
-        lambda row: _classify_wet_fuel_type(
-            fuel=row["fuel"],
-            technology_family=row["technology_family"],
-        ),
-        axis=1,
-    )
-    wet["thermal_efficiency"] = wet.apply(
-        lambda row: _fuel_efficiency(row["wet_fuel_type"], row["mw"]),
-        axis=1,
-    )
+    wet["wet_fuel_type"] = [
+        _classify_wet_fuel_type(fuel=fuel, technology_family=technology_family)
+        for fuel, technology_family in zip(
+            wet["fuel"],
+            wet["technology_family"],
+            strict=True,
+        )
+    ]
+    wet["thermal_efficiency"] = [
+        _fuel_efficiency(wet_fuel_type, mw)
+        for wet_fuel_type, mw in zip(
+            wet["wet_fuel_type"],
+            wet["mw"],
+            strict=True,
+        )
+    ]
     wet["heat_rejection_coefficient"] = wet["wet_fuel_type"].map(HEAT_REJECTION_COEFFICIENTS)
     wet["evaporation_coefficient"] = wet["wet_fuel_type"].map(EVAPORATION_COEFFICIENTS)
     wet["cell_total_mw"] = wet.groupby(["grid_lat", "grid_lon"])["mw"].transform("sum")

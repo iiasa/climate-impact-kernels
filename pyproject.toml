@@ -5,6 +5,7 @@ description = "Domain-oriented climate-impact preprocessing utilities."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "cftime>=1.6.5",
     "climateresponse",
     "pandas>=2.2",
     "pyarrow>=16.0",
