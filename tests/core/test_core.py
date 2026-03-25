@@ -1,18 +1,28 @@
 import unittest
+from datetime import datetime
 
+import cftime
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from climateresponse import (
+    aggregate_monthly,
     aggregate_annual,
     aggregate_seasonal,
+    attach_gridded_dataarray,
+    attach_gridded_dataset,
     assign_years_to_levels,
     bin_by_warming_level,
     compute_anomaly,
     compute_running_mean,
     deterministic_resampling,
+    evaluate_mapped_dataset,
     interpolate_along_warming_level,
     match_warming_levels,
+    normalize_pressure,
+    normalize_temperature,
+    resolve_unit,
     weighted_average,
     weighted_quantiles,
 )
@@ -90,6 +100,70 @@ class WarmingLevelTest(unittest.TestCase):
 
 
 class TemporalTest(unittest.TestCase):
+    def test_aggregate_monthly_preserves_pandas_month_starts(self) -> None:
+        monthly = aggregate_monthly(
+            xr.DataArray(
+                [1.0, 3.0, 5.0],
+                dims=["time"],
+                coords={
+                    "time": np.array(
+                        ["2000-01-01", "2000-01-15", "2000-02-01"],
+                        dtype="datetime64[ns]",
+                    )
+                },
+            )
+        )
+
+        self.assertEqual(
+            monthly.time.values.tolist(),
+            [datetime(2000, 1, 1), datetime(2000, 2, 1)],
+        )
+        self.assertEqual(monthly.sel(time="2000-01-01").item(), 2.0)
+        self.assertEqual(monthly.sel(time="2000-02-01").item(), 5.0)
+
+    def test_aggregate_monthly_preserves_360_day_calendar(self) -> None:
+        time = [
+            cftime.Datetime360Day(2001, 2, 1),
+            cftime.Datetime360Day(2001, 2, 30),
+            cftime.Datetime360Day(2001, 3, 1),
+        ]
+        monthly = aggregate_monthly(
+            xr.DataArray(
+                [10.0, 14.0, 20.0],
+                dims=["time"],
+                coords={"time": time},
+            )
+        )
+
+        self.assertEqual(
+            monthly.time.values.tolist(),
+            [
+                cftime.Datetime360Day(2001, 2, 1),
+                cftime.Datetime360Day(2001, 3, 1),
+            ],
+        )
+        self.assertEqual(monthly.sel(time=cftime.Datetime360Day(2001, 2, 1)).item(), 12.0)
+        self.assertEqual(monthly.sel(time=cftime.Datetime360Day(2001, 3, 1)).item(), 20.0)
+
+    def test_aggregate_monthly_preserves_monthly_constants_across_lengths(self) -> None:
+        day_counts = [31, 28, 31, 30]
+        values = []
+        time = []
+
+        for month, day_count in enumerate(day_counts, start=1):
+            values.extend([float(month)] * day_count)
+            time.extend(cftime.DatetimeNoLeap(2001, month, day) for day in range(1, day_count + 1))
+
+        monthly = aggregate_monthly(
+            xr.DataArray(
+                values,
+                dims=["time"],
+                coords={"time": time},
+            )
+        )
+
+        self.assertEqual(monthly.values.tolist(), [1.0, 2.0, 3.0, 4.0])
+
     def test_aggregate_annual(self) -> None:
         annual = aggregate_annual(
             xr.DataArray(
@@ -146,6 +220,106 @@ class SpatialTest(unittest.TestCase):
         )
 
         self.assertEqual(value.item(), 10.0)
+
+    def test_attach_gridded_dataset_preserves_requested_metadata(self) -> None:
+        attached = attach_gridded_dataset(
+            mapped_entities=pd.DataFrame(
+                {
+                    "UNITID": [101, 202],
+                    "country": ["A", "B"],
+                    "grid_lat": [0.5, 1.5],
+                    "grid_lon": [-0.5, 0.5],
+                }
+            ),
+            dataset=xr.Dataset(
+                data_vars={
+                    "tas": (
+                        ("time", "lat", "lon"),
+                        [[[1.0, 2.0], [3.0, 4.0]]],
+                    )
+                },
+                coords={"time": [0], "lat": [0.5, 1.5], "lon": [-0.5, 0.5]},
+            ),
+            metadata_columns=["UNITID", "country"],
+        )
+
+        self.assertEqual(attached["tas"].dims, ("time", "entity"))
+        self.assertEqual(attached.coords["UNITID"].values.tolist(), [101, 202])
+        self.assertEqual(attached.coords["country"].values.tolist(), ["A", "B"])
+
+    def test_attach_gridded_dataarray_normalizes_longitude_to_360_grid(self) -> None:
+        attached = attach_gridded_dataarray(
+            mapped_entities=pd.DataFrame(
+                {
+                    "UNITID": [101],
+                    "grid_lat": [0.5],
+                    "grid_lon": [-0.5],
+                }
+            ),
+            data=xr.DataArray(
+                [[[9.0]]],
+                dims=["time", "lat", "lon"],
+                coords={"time": [0], "lat": [0.5], "lon": [359.5]},
+                name="tas",
+            ),
+        )
+
+        self.assertEqual(attached.sel(entity=101).item(), 9.0)
+
+
+class UnitsTest(unittest.TestCase):
+    def test_resolve_and_normalize_temperature(self) -> None:
+        data = xr.DataArray([300.15], dims=["time"], name="tas", attrs={"units": "K"})
+
+        unit = resolve_unit(data)
+        normalized = normalize_temperature(data, target_unit="C", unit=unit)
+
+        self.assertEqual(unit, "K")
+        self.assertAlmostEqual(normalized.item(), 27.0)
+
+    def test_normalize_pressure(self) -> None:
+        normalized = normalize_pressure(
+            xr.DataArray([101325.0], dims=["time"], name="ps", attrs={"units": "Pa"}),
+            target_unit="kPa",
+            unit="Pa",
+        )
+
+        self.assertAlmostEqual(normalized.item(), 101.325)
+
+
+class EvaluationTest(unittest.TestCase):
+    def test_evaluate_mapped_dataset_runs_full_pipeline(self) -> None:
+        evaluated = evaluate_mapped_dataset(
+            mapped_entities=pd.DataFrame(
+                {
+                    "UNITID": [101],
+                    "grid_lat": [0.5],
+                    "grid_lon": [1.5],
+                    "mw": [100.0],
+                }
+            ),
+            climate_inputs=xr.Dataset(
+                data_vars={
+                    "tas": (
+                        ("time", "lat", "lon"),
+                        [[[300.15, 301.15]]],
+                    )
+                },
+                coords={"time": [0], "lat": [0.5], "lon": [0.5, 1.5]},
+            ),
+            normalize_inputs=lambda dataset: dataset.rename({"tas": "air_temperature"}),
+            physics_kernel=lambda attached: xr.Dataset(
+                data_vars={
+                    "capacity_factor": ((1.0 - (attached["air_temperature"] - 300.0))).rename("capacity_factor"),
+                }
+            ),
+            metadata_columns=["UNITID", "mw"],
+            clips={"capacity_factor": (0.0, 1.0)},
+        )
+
+        self.assertEqual(evaluated["capacity_factor"].dims, ("time", "entity"))
+        self.assertEqual(evaluated.coords["UNITID"].values.tolist(), [101])
+        self.assertAlmostEqual(evaluated["capacity_factor"].sel(entity=101).item(), 0.0)
 
 
 class ResponseTest(unittest.TestCase):

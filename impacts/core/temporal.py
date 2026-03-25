@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias
 
+import pandas as pd
 import xarray as xr
 
 ArrayLike: TypeAlias = xr.DataArray | xr.Dataset
@@ -13,6 +14,17 @@ CLIMATOLOGICAL_SEASONS: dict[str, tuple[int, ...]] = {
     "JJA": (6, 7, 8),
     "SON": (9, 10, 11),
 }
+
+
+def aggregate_monthly(
+    data: ArrayLike,
+    time_dim: str = "time",
+) -> ArrayLike:
+    """Aggregate sub-monthly data into monthly means."""
+
+    _validate_time_dim(data=data, time_dim=time_dim)
+    monthly_labels = _month_start_labels(data=data, time_dim=time_dim)
+    return data.groupby(monthly_labels).mean(dim=time_dim).rename({monthly_labels.name: time_dim})
 
 
 def aggregate_annual(
@@ -73,3 +85,23 @@ def _aggregate_single_season(
         year = year + xr.where(selected[time_dim].dt.month == 12, 1, 0)
 
     return selected.groupby(year.rename("year")).mean(dim=time_dim).expand_dims(season=[season])
+
+
+def _month_start_labels(data: ArrayLike, time_dim: str) -> xr.DataArray:
+    """Return month-start labels that preserve the source calendar."""
+
+    time_coord = data[time_dim]
+    labels = [_month_start(value) for value in time_coord.values]
+    return xr.DataArray(
+        labels,
+        dims=[time_dim],
+        coords={time_dim: time_coord},
+        name=f"{time_dim}_month",
+    )
+
+
+def _month_start(value: object) -> object:
+    if hasattr(value, "year") and hasattr(value, "month"):
+        return type(value)(value.year, value.month, 1)
+    timestamp = pd.Timestamp(value)
+    return pd.Timestamp(year=timestamp.year, month=timestamp.month, day=1)
