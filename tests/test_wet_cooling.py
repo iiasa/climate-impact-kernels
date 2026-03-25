@@ -242,6 +242,54 @@ class WetCoolingContractTest(unittest.TestCase):
         )
 
 
+class WetCoolingDaskTest(WetCoolingContractTest):
+    """Re-run all wet-cooling tests with dask-backed climate arrays.
+
+    Kernels must produce correct results from chunked inputs.
+    Tests that extract scalars override the parent to .compute() first.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.climate = self.climate.chunk({"time": 1})
+
+    def test_normalize_wet_cooling_inputs_renames_and_converts_units(self) -> None:
+        normalized = normalize_wet_cooling_climate_inputs(self.climate).compute()
+        self.assertEqual(
+            set(normalized.data_vars),
+            {"water_temperature", "discharge", "air_temperature", "relative_humidity", "surface_pressure"},
+        )
+        self.assertAlmostEqual(normalized["water_temperature"].isel(time=0, lat=0, lon=0).item(), 15.0)
+        self.assertAlmostEqual(normalized["surface_pressure"].isel(time=0, lat=1, lon=0).item(), 100.5)
+
+    def test_compute_monthly_wet_cooling_impacts_matches_li_equations(self) -> None:
+        mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
+        monthly = compute_monthly_wet_cooling_impacts(mapping, self.climate).compute()
+        params = WetCoolingAssumptions()
+
+        self.assertEqual(monthly.sizes["entity"], 5)
+        self.assertEqual(monthly["capacity_factor"].dims, ("time", "entity"))
+
+        coal_withdrawal = _once_through_withdrawal_intensity(fuel="COAL", mw=100.0, water_temperature_c=15.0, params=params)
+        coal_unit_discharge = 1.0 * (1.0 - params.environmental_flow_fraction) * (100.0 / 370.0)
+        coal_usable_capacity = min(3600.0 * coal_unit_discharge / coal_withdrawal, 100.0)
+        self.assertAlmostEqual(
+            monthly["withdrawal_intensity_m3_per_mwh"].sel(time="2001-01-01", entity=101).item(),
+            coal_withdrawal, places=8,
+        )
+        self.assertAlmostEqual(
+            monthly["usable_capacity_mw"].sel(time="2001-01-01", entity=101).item(),
+            coal_usable_capacity, places=8,
+        )
+        self.assertFalse(monthly["discharge_constraint_applies"].sel(entity=102).item())
+
+    def test_aggregate_seasonal_wet_cooling_impacts_uses_climateresponse(self) -> None:
+        mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
+        monthly = compute_monthly_wet_cooling_impacts(mapping, self.climate).compute()
+        seasonal = aggregate_seasonal_wet_cooling_impacts(monthly)
+        self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
+
+
 def _classify_fuel(fuel: str) -> str:
     normalized = fuel.upper()
     if any(marker in normalized for marker in ("NUC", "URANIUM", "UR")):

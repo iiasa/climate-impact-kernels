@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+import pandas as pd
 import xarray as xr
 from climateresponse import aggregate_monthly
 
@@ -26,6 +27,7 @@ class ISIMIPVariable:
     name: str
     product: str       # "climate" or "watergap"
     frequency: str     # "daily" or "monthly"
+    output_name: str | None = None  # rename to this in the output dataset (default: keep name)
 
 
 @dataclass(frozen=True)
@@ -59,7 +61,7 @@ WET_COOLING_VARIABLES = (
     ISIMIPVariable("hurs", "climate", "daily"),
     ISIMIPVariable("ps", "climate", "daily"),
     ISIMIPVariable("dis", "watergap", "daily"),
-    ISIMIPVariable("triver", "watergap", "monthly"),
+    ISIMIPVariable("triver", "watergap", "monthly", output_name="tw"),
 )
 
 DRY_COOLING_VARIABLES = (
@@ -73,15 +75,6 @@ ISIMIP3B_GCMS = (
     "MRI-ESM2-0",
     "UKESM1-0-LL",
 )
-
-WATERGAP_SOCPATH = {
-    "historical": "histsoc",
-    "picontrol": "histsoc",
-    "ssp126": "2015soc-from-histsoc",
-    "ssp370": "2015soc-from-histsoc",
-    "ssp585": "2015soc-from-histsoc",
-}
-
 
 # ── File discovery ───────────────────────────────────────────────────────────
 
@@ -162,16 +155,14 @@ def load_isimip_dataset(
             year_range=year_range,
             chunks=chunks,
         )
-        arrays[variable.name] = da
+        da = _standardize_time_index(da)
+        key = variable.output_name or variable.name
+        da = da.rename(key)
+        da.attrs["isimip_product"] = variable.product
+        da.attrs["isimip_native_frequency"] = variable.frequency
+        arrays[key] = da
 
-    merged = xr.merge(arrays.values(), join="inner")
-
-    for var in merged.data_vars:
-        source = next(v for v in variables if v.name == var)
-        merged[var].attrs["isimip_product"] = source.product
-        merged[var].attrs["isimip_native_frequency"] = source.frequency
-
-    return merged
+    return xr.merge(arrays.values(), join="inner")
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
@@ -196,8 +187,7 @@ def _file_glob_pattern(
     gcm_lower = gcm.lower()
     if variable.product == "climate":
         return f"{gcm_lower}_*_{scenario}_{variable.name}_global_*.nc"
-    socpath = WATERGAP_SOCPATH.get(scenario, "2015soc-from-histsoc")
-    return f"watergap2-2e_{gcm_lower}_*_{scenario}_{socpath}_default_{variable.name}_global_*.nc"
+    return f"watergap2-2e_{gcm_lower}_*_{scenario}_*_default_{variable.name}_global_*.nc"
 
 
 def _file_overlaps_years(path: Path, year_range: tuple[int, int]) -> bool:
@@ -216,3 +206,13 @@ def _file_overlaps_years(path: Path, year_range: tuple[int, int]) -> bool:
     except ValueError:
         return True
     return file_end >= year_range[0] and file_start <= year_range[1]
+
+
+def _standardize_time_index(da: xr.DataArray, time_dim: str = "time") -> xr.DataArray:
+    """Convert cftime time coordinates to pandas timestamps for cross-product merging."""
+
+    time_values = da[time_dim].values
+    if len(time_values) == 0 or isinstance(time_values[0], pd.Timestamp):
+        return da
+    pandas_times = pd.DatetimeIndex([pd.Timestamp(str(t)) for t in time_values])
+    return da.assign_coords({time_dim: pandas_times})

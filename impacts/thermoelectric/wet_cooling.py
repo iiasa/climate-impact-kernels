@@ -340,8 +340,7 @@ def _evaluate_wet_cooling_kernel(
         recirculating_withdrawal,
     ).rename("withdrawal_intensity_m3_per_mwh")
 
-    discharge_limited_capacity = xr.apply_ufunc(
-        np.minimum,
+    discharge_limited_capacity = np.minimum(
         3600.0 * unit_available_discharge / withdrawal_intensity,
         attached.coords["mw"],
     )
@@ -445,9 +444,8 @@ def _once_through_temperature_headroom(
     max_discharge_temp_c: float,
     max_temp_rise_c: float,
 ) -> xr.DataArray:
-    return xr.apply_ufunc(
-        np.maximum,
-        xr.apply_ufunc(np.minimum, max_discharge_temp_c - water_temperature_c, max_temp_rise_c),
+    return np.maximum(
+        np.minimum(max_discharge_temp_c - water_temperature_c, max_temp_rise_c),
         0.0,
     )
 
@@ -503,7 +501,7 @@ def _recirculating_withdrawal_intensity(
 
 def _compute_saturation_vapor_pressure(air_temperature_c: xr.DataArray) -> xr.DataArray:
     exponent = 7.5 * air_temperature_c / (237.7 + air_temperature_c)
-    return 6.11 * xr.apply_ufunc(np.power, 10.0, exponent) * 100.0
+    return 6.11 * np.power(10.0, exponent) * 100.0
 
 
 def _humidity_ratio(

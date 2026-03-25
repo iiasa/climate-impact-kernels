@@ -4,11 +4,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cftime
+import numpy as np
+import pandas as pd
+import xarray as xr
+
 from impacts.isimip import (
     ISIMIPPaths,
     ISIMIPVariable,
-    WATERGAP_SOCPATH,
     _file_overlaps_years,
+    _standardize_time_index,
     discover_isimip_files,
 )
 
@@ -73,11 +78,6 @@ class FileDiscoveryTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             discover_isimip_files(tas, "NONEXISTENT-GCM", "historical", self.paths)
 
-    def test_socpath_mapping_covers_standard_scenarios(self) -> None:
-        for scenario in ["historical", "ssp126", "ssp370", "ssp585"]:
-            self.assertIn(scenario, WATERGAP_SOCPATH)
-
-
 class YearOverlapTest(unittest.TestCase):
     def test_file_within_range(self) -> None:
         path = Path("foo_global_daily_2001_2010.nc")
@@ -98,6 +98,38 @@ class YearOverlapTest(unittest.TestCase):
     def test_unparseable_returns_true(self) -> None:
         path = Path("some_weird_file.nc")
         self.assertTrue(_file_overlaps_years(path, (2001, 2010)))
+
+
+class CalendarStandardizationTest(unittest.TestCase):
+    def test_cftime_converted_to_pandas_timestamps(self) -> None:
+        import datetime
+        cftime_times = [cftime.DatetimeNoLeap(2015, m, 1) for m in range(1, 4)]
+        da = xr.DataArray(np.ones(3), dims=["time"], coords={"time": cftime_times})
+        result = _standardize_time_index(da)
+        self.assertIsInstance(result.time.values[0], np.datetime64)
+
+    def test_pandas_timestamps_pass_through(self) -> None:
+        times = pd.date_range("2015-01-01", periods=3, freq="MS")
+        da = xr.DataArray(np.ones(3), dims=["time"], coords={"time": times})
+        result = _standardize_time_index(da)
+        np.testing.assert_array_equal(result.time.values, da.time.values)
+
+    def test_mixed_calendar_merge_produces_nonempty_time(self) -> None:
+        """The bug: cftime and pandas month-starts don't merge via inner join."""
+        pandas_times = pd.date_range("2015-01-01", periods=3, freq="MS")
+        cftime_times = [cftime.DatetimeNoLeap(2015, m, 1) for m in range(1, 4)]
+
+        a = xr.DataArray(np.ones(3), dims=["time"], coords={"time": pandas_times}, name="tas")
+        b = xr.DataArray(np.ones(3), dims=["time"], coords={"time": cftime_times}, name="tw")
+
+        # Without standardization: inner join produces empty time
+        bad_merge = xr.merge([a, b], join="inner")
+        self.assertEqual(bad_merge.sizes["time"], 0)
+
+        # With standardization: works
+        b_fixed = _standardize_time_index(b)
+        good_merge = xr.merge([a, b_fixed], join="inner")
+        self.assertEqual(good_merge.sizes["time"], 3)
 
 
 if __name__ == "__main__":

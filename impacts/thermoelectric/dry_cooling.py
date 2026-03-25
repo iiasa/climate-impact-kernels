@@ -370,39 +370,39 @@ def _classify_fuel_group(fuel: str) -> str:
 
 def _compute_backpressure(air_temperature_k: xr.DataArray) -> xr.DataArray:
     air_temperature_f = (air_temperature_k - 273.15) * 9.0 / 5.0 + 32.0
-    return 1.031 * xr.apply_ufunc(np.exp, 0.019 * air_temperature_f)
+    return 1.031 * np.exp(0.019 * air_temperature_f)
 
 
 def _combustible_steam_efficiency_loss(air_temperature_k: xr.DataArray) -> xr.DataArray:
     return (
-        1.73e-10 * xr.apply_ufunc(np.exp, 0.0684 * air_temperature_k)
-        - 6.64e-7 * xr.apply_ufunc(np.exp, 0.0342 * air_temperature_k)
+        1.73e-10 * np.exp(0.0684 * air_temperature_k)
+        - 6.64e-7 * np.exp(0.0342 * air_temperature_k)
         - 0.0062
     )
 
 
 def _combined_cycle_efficiency_loss(air_temperature_k: xr.DataArray) -> xr.DataArray:
     return (
-        -1.83e-15 * xr.apply_ufunc(np.exp, 0.1026 * air_temperature_k)
-        + 2.26e-10 * xr.apply_ufunc(np.exp, 0.0684 * air_temperature_k)
-        - 2.66e-6 * xr.apply_ufunc(np.exp, 0.0342 * air_temperature_k)
+        -1.83e-15 * np.exp(0.1026 * air_temperature_k)
+        + 2.26e-10 * np.exp(0.0684 * air_temperature_k)
+        - 2.66e-6 * np.exp(0.0342 * air_temperature_k)
         + 0.0033
     )
 
 
 def _non_combustible_steam_efficiency_loss(air_temperature_k: xr.DataArray) -> xr.DataArray:
     return (
-        -5.95e-15 * xr.apply_ufunc(np.exp, 0.1026 * air_temperature_k)
-        + 4.66e-10 * xr.apply_ufunc(np.exp, 0.0684 * air_temperature_k)
-        - 4.75e-6 * xr.apply_ufunc(np.exp, 0.0342 * air_temperature_k)
+        -5.95e-15 * np.exp(0.1026 * air_temperature_k)
+        + 4.66e-10 * np.exp(0.0684 * air_temperature_k)
+        - 4.75e-6 * np.exp(0.0342 * air_temperature_k)
         + 0.0098
     )
 
 
 def _nuclear_steam_efficiency_loss(air_temperature_k: xr.DataArray) -> xr.DataArray:
     return (
-        -2.75e-15 * xr.apply_ufunc(np.exp, 0.1026 * air_temperature_k)
-        + 2.73e-10 * xr.apply_ufunc(np.exp, 0.0684 * air_temperature_k)
-        - 3.45e-6 * xr.apply_ufunc(np.exp, 0.0342 * air_temperature_k)
+        -2.75e-15 * np.exp(0.1026 * air_temperature_k)
+        + 2.73e-10 * np.exp(0.0684 * air_temperature_k)
+        - 3.45e-6 * np.exp(0.0342 * air_temperature_k)
         + 0.0111
     )

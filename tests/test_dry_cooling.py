@@ -165,5 +165,48 @@ class DryCoolingContractTest(unittest.TestCase):
         )
 
 
+class DryCoolingDaskTest(DryCoolingContractTest):
+    """Re-run all dry-cooling tests with dask-backed climate arrays.
+
+    Kernels must produce correct results from chunked inputs.
+    Assertions call .compute() where needed since .item() is not
+    available on dask arrays.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.climate = self.climate.chunk({"time": 1})
+
+    def _compute(self, result):
+        """Materialize dask arrays before scalar assertions."""
+        return result.compute() if hasattr(result, "compute") else result
+
+    def test_normalize_dry_cooling_inputs_renames_and_converts_units(self) -> None:
+        normalized = normalize_dry_cooling_climate_inputs(self.climate).compute()
+        self.assertEqual(set(normalized.data_vars), {"air_temperature_k"})
+        self.assertAlmostEqual(normalized["air_temperature_k"].isel(time=0, lat=0, lon=0).item(), 283.15)
+
+    def test_compute_monthly_dry_cooling_impacts_returns_capacity_outputs(self) -> None:
+        mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
+        monthly = compute_monthly_dry_cooling_impacts(mapping, self.climate).compute()
+
+        self.assertEqual(monthly.sizes["entity"], 4)
+        combustible_steam = monthly["capacity_factor"].sel(entity=101)
+        combined_cycle = monthly["capacity_factor"].sel(entity=202)
+        unsupported = monthly["capacity_factor"].sel(entity=303)
+        nuclear = monthly["capacity_factor"].sel(entity=404)
+
+        self.assertGreater(combustible_steam.isel(time=0).item(), combustible_steam.isel(time=2).item())
+        self.assertGreater(combined_cycle.isel(time=0).item(), combined_cycle.isel(time=2).item())
+        self.assertGreater(nuclear.isel(time=0).item(), nuclear.isel(time=2).item())
+        self.assertAlmostEqual(unsupported.isel(time=0).item(), 1.0)
+
+    def test_aggregate_seasonal_dry_cooling_impacts_uses_climateresponse(self) -> None:
+        mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
+        monthly = compute_monthly_dry_cooling_impacts(mapping, self.climate).compute()
+        seasonal = aggregate_seasonal_dry_cooling_impacts(monthly)
+        self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
+
+
 if __name__ == "__main__":
     unittest.main()
