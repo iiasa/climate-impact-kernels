@@ -90,6 +90,25 @@ DEFAULT_IMPUTED_WET_MAPPING_COLUMNS = [
     "location_is_single_cell",
 ]
 
+DEFAULT_IMPUTED_DRY_MAPPING_COLUMNS = [
+    "UNITID",
+    "LOCATIONID",
+    "country",
+    "lat",
+    "lon",
+    "grid_lat",
+    "grid_lon",
+    "cell_id",
+    "mw",
+    "coordinate_source",
+    "imputation_rule",
+    "donor_UNITID",
+    "donor_LOCATIONID",
+    "donor_country",
+    "location_cell_count",
+    "location_is_single_cell",
+]
+
 DEFAULT_LOCATION_COLUMNS = [
     "LOCATIONID",
     "country",
@@ -225,13 +244,75 @@ def build_imputed_wet_unit_cell_mapping(
         missing_list = ", ".join(sorted(missing_cooling))
         raise ValueError(f"cooling_mapping missing required columns: {missing_list}")
 
-    wet_population = cooling_mapping.loc[cooling_mapping["requires_water"].fillna(False)].copy()
-    wet_population["size_class"] = _classify_size_class(wet_population["mw"])
-    wet_population = wet_population.sort_values(["country", "LOCATIONID", "UNITID"], kind="stable")
+    wet_population = (
+        cooling_mapping.loc[cooling_mapping["requires_water"].fillna(False)].copy().pipe(
+            _prepare_imputation_population
+        )
+    )
+    return _build_imputed_population_mapping(
+        thermal_plants,
+        wet_population,
+        columns=DEFAULT_IMPUTED_WET_MAPPING_COLUMNS,
+        random_seed=random_seed,
+    )
 
+
+def build_imputed_dry_unit_cell_mapping(
+    thermal_plants: pd.DataFrame,
+    cooling_mapping: pd.DataFrame,
+    *,
+    random_seed: int = 0,
+) -> pd.DataFrame:
+    """Build a full Qin-supported dry-fleet mapping with explicit provenance."""
+
+    missing = REQUIRED_COLUMNS.difference(thermal_plants.columns)
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(f"missing required columns: {missing_list}")
+
+    required_cooling = {
+        "UNITID",
+        "LOCATIONID",
+        "country",
+        "mw",
+        "fuel",
+        "technology_family",
+        "cooling_physics",
+    }
+    missing_cooling = required_cooling.difference(cooling_mapping.columns)
+    if missing_cooling:
+        missing_list = ", ".join(sorted(missing_cooling))
+        raise ValueError(f"cooling_mapping missing required columns: {missing_list}")
+
+    from impacts.thermoelectric.dry_cooling import classify_dry_cooling_engine_type
+
+    dry_population = cooling_mapping.loc[cooling_mapping["cooling_physics"].eq("dry")].copy()
+    support_flags = dry_population.apply(
+        lambda row: classify_dry_cooling_engine_type(
+            technology_family=str(row["technology_family"]),
+            fuel=str(row["fuel"]),
+        )[1],
+        axis=1,
+    )
+    supported_dry_population = dry_population.loc[support_flags].copy().pipe(_prepare_imputation_population)
+    return _build_imputed_population_mapping(
+        thermal_plants,
+        supported_dry_population,
+        columns=DEFAULT_IMPUTED_DRY_MAPPING_COLUMNS,
+        random_seed=random_seed,
+    )
+
+
+def _build_imputed_population_mapping(
+    thermal_plants: pd.DataFrame,
+    population: pd.DataFrame,
+    *,
+    columns: list[str],
+    random_seed: int,
+) -> pd.DataFrame:
     recovered = build_recovered_unit_cell_mapping(thermal_plants)
-    recovered_wet = (
-        recovered.loc[recovered["UNITID"].isin(wet_population["UNITID"])]
+    recovered_population = (
+        recovered.loc[recovered["UNITID"].isin(population["UNITID"])]
         .copy()
         .assign(
             imputation_rule=pd.NA,
@@ -241,17 +322,17 @@ def build_imputed_wet_unit_cell_mapping(
         )
     )
 
-    unresolved = wet_population.loc[~wet_population["UNITID"].isin(recovered_wet["UNITID"])].copy()
+    unresolved = population.loc[~population["UNITID"].isin(recovered_population["UNITID"])].copy()
     if unresolved.empty:
         return (
-            recovered_wet.loc[:, DEFAULT_IMPUTED_WET_MAPPING_COLUMNS]
+            recovered_population.loc[:, columns]
             .sort_values(["country", "LOCATIONID", "UNITID"], kind="stable")
             .reset_index(drop=True)
         )
 
     donor_units = (
-        recovered_wet.merge(
-            wet_population.loc[:, ["UNITID", "LOCATIONID", "country", "cooling_physics", "size_class"]],
+        recovered_population.merge(
+            population.loc[:, ["UNITID", "LOCATIONID", "country", "cooling_physics", "size_class"]],
             on=["UNITID", "LOCATIONID", "country"],
             how="inner",
             validate="one_to_one",
@@ -286,8 +367,8 @@ def build_imputed_wet_unit_cell_mapping(
 
     combined = pd.concat(
         [
-            recovered_wet.loc[:, DEFAULT_IMPUTED_WET_MAPPING_COLUMNS],
-            imputed.loc[:, DEFAULT_IMPUTED_WET_MAPPING_COLUMNS],
+            recovered_population.loc[:, columns],
+            imputed.loc[:, columns],
         ],
         ignore_index=True,
     )
@@ -445,6 +526,12 @@ def _classify_size_class(mw: pd.Series) -> pd.Series:
     )
 
 
+def _prepare_imputation_population(frame: pd.DataFrame) -> pd.DataFrame:
+    prepared = frame.copy()
+    prepared["size_class"] = _classify_size_class(prepared["mw"])
+    return prepared.sort_values(["country", "LOCATIONID", "UNITID"], kind="stable")
+
+
 def _build_donor_lookup(donor_units: pd.DataFrame) -> dict[str, dict[tuple[object, ...], np.ndarray]]:
     lookups: dict[str, dict[tuple[object, ...], np.ndarray]] = {}
 
@@ -573,6 +660,40 @@ def write_imputed_wet_unit_cell_mapping(
         random_seed=random_seed,
     )
     selected = mapped.loc[:, columns or DEFAULT_IMPUTED_WET_MAPPING_COLUMNS]
+    summary = summarize_mapping(mapped)
+
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    match destination.suffix.lower():
+        case ".parquet":
+            selected.to_parquet(destination, index=False)
+        case ".csv":
+            selected.to_csv(destination, index=False)
+        case _:
+            raise ValueError("output_path must end with .parquet or .csv")
+
+    return summary
+
+
+def write_imputed_dry_unit_cell_mapping(
+    source_path: str | Path,
+    cooling_path: str | Path,
+    output_path: str | Path,
+    columns: list[str] | None = None,
+    *,
+    random_seed: int = 0,
+) -> CellMappingSummary:
+    """Build and write the full Qin-supported dry-fleet mapping with provenance."""
+
+    thermal_plants = pd.read_parquet(Path(source_path))
+    cooling_mapping = pd.read_parquet(Path(cooling_path))
+    mapped = build_imputed_dry_unit_cell_mapping(
+        thermal_plants,
+        cooling_mapping,
+        random_seed=random_seed,
+    )
+    selected = mapped.loc[:, columns or DEFAULT_IMPUTED_DRY_MAPPING_COLUMNS]
     summary = summarize_mapping(mapped)
 
     destination = Path(output_path)

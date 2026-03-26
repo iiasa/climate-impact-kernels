@@ -6,8 +6,10 @@ import unittest
 import pandas as pd
 
 from impacts.thermoelectric.mapping import (
+    build_imputed_dry_unit_cell_mapping,
     build_imputed_wet_unit_cell_mapping,
     build_recovered_unit_cell_mapping,
+    write_imputed_dry_unit_cell_mapping,
     write_imputed_wet_unit_cell_mapping,
     write_recovered_unit_cell_mapping,
 )
@@ -147,6 +149,87 @@ class RecoveryContractTest(unittest.TestCase):
             cooling.to_parquet(cooling_path, index=False)
 
             summary = write_imputed_wet_unit_cell_mapping(source, cooling_path, target, random_seed=0)
+            written = pd.read_parquet(target)
+
+            self.assertEqual(summary.coordinate_units, 3)
+            self.assertIn("coordinate_source", written.columns)
+            self.assertIn("imputation_rule", written.columns)
+            self.assertEqual(
+                written["coordinate_source"].tolist(),
+                ["source", "inherited_location", "imputed_unit_donor"],
+            )
+
+    def test_imputed_dry_mapping_targets_only_qin_supported_units(self) -> None:
+        plants = pd.DataFrame(
+            {
+                "UNITID": [1, 2, 3, 4, 5],
+                "LOCATIONID": [10, 10, 20, 30, 40],
+                "country": ["A", "A", "A", "A", "B"],
+                "lat": [10.2, None, 11.1, None, None],
+                "lon": [20.2, None, 21.1, None, None],
+                "mw": [120.0, 90.0, 150.0, 80.0, 140.0],
+                "has_coords": [True, False, True, False, False],
+            }
+        )
+        cooling = pd.DataFrame(
+            {
+                "UNITID": [1, 2, 3, 4, 5],
+                "LOCATIONID": [10, 10, 20, 30, 40],
+                "country": ["A", "A", "A", "A", "B"],
+                "mw": [120.0, 90.0, 150.0, 80.0, 140.0],
+                "fuel": ["COAL", "COAL", "GAS", "DIESEL", "SOLAR"],
+                "technology_family": [
+                    "steam",
+                    "steam",
+                    "combined_cycle",
+                    "gas_turbine",
+                    "steam",
+                ],
+                "cooling_physics": ["dry", "dry", "dry", "dry", "dry"],
+            }
+        )
+
+        mapped = build_imputed_dry_unit_cell_mapping(plants, cooling, random_seed=0)
+
+        self.assertEqual(set(mapped["UNITID"].tolist()), {1, 2, 3, 5})
+        self.assertEqual(
+            mapped["coordinate_source"].tolist(),
+            ["source", "inherited_location", "source", "imputed_unit_donor"],
+        )
+        self.assertEqual(mapped.loc[mapped["UNITID"].eq(5), "imputation_rule"].iloc[0], "cooling_size")
+
+    def test_imputed_dry_writer_materializes_supported_subset_with_provenance(self) -> None:
+        plants = pd.DataFrame(
+            {
+                "UNITID": [1, 2, 3],
+                "LOCATIONID": [10, 10, 20],
+                "country": ["A", "A", "A"],
+                "lat": [10.2, None, None],
+                "lon": [20.2, None, None],
+                "mw": [120.0, 90.0, 150.0],
+                "has_coords": [True, False, False],
+            }
+        )
+        cooling = pd.DataFrame(
+            {
+                "UNITID": [1, 2, 3],
+                "LOCATIONID": [10, 10, 20],
+                "country": ["A", "A", "A"],
+                "mw": [120.0, 90.0, 150.0],
+                "fuel": ["COAL", "COAL", "GAS"],
+                "technology_family": ["steam", "steam", "combined_cycle"],
+                "cooling_physics": ["dry", "dry", "dry"],
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = f"{tmpdir}/plants.parquet"
+            cooling_path = f"{tmpdir}/cooling.parquet"
+            target = f"{tmpdir}/dry_imputed.parquet"
+            plants.to_parquet(source, index=False)
+            cooling.to_parquet(cooling_path, index=False)
+
+            summary = write_imputed_dry_unit_cell_mapping(source, cooling_path, target, random_seed=0)
             written = pd.read_parquet(target)
 
             self.assertEqual(summary.coordinate_units, 3)
