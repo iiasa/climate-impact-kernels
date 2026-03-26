@@ -71,6 +71,25 @@ DEFAULT_RECOVERED_MAPPING_COLUMNS = [
     "location_is_single_cell",
 ]
 
+DEFAULT_IMPUTED_WET_MAPPING_COLUMNS = [
+    "UNITID",
+    "LOCATIONID",
+    "country",
+    "lat",
+    "lon",
+    "grid_lat",
+    "grid_lon",
+    "cell_id",
+    "mw",
+    "coordinate_source",
+    "imputation_rule",
+    "donor_UNITID",
+    "donor_LOCATIONID",
+    "donor_country",
+    "location_cell_count",
+    "location_is_single_cell",
+]
+
 DEFAULT_LOCATION_COLUMNS = [
     "LOCATIONID",
     "country",
@@ -88,6 +107,17 @@ DEFAULT_COUNTRY_COLUMNS = [
     "entities",
     "mw",
     "source_resolution",
+]
+
+WET_IMPUTATION_BACKOFF_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("country_cooling_size", ("country", "cooling_physics", "size_class")),
+    ("country_cooling", ("country", "cooling_physics")),
+    ("country_size", ("country", "size_class")),
+    ("country", ("country",)),
+    ("cooling_size", ("cooling_physics", "size_class")),
+    ("cooling", ("cooling_physics",)),
+    ("size", ("size_class",)),
+    ("global", ()),
 ]
 
 
@@ -168,6 +198,96 @@ def build_recovered_unit_cell_mapping(thermal_plants: pd.DataFrame) -> pd.DataFr
         [
             exact.loc[:, DEFAULT_RECOVERED_MAPPING_COLUMNS],
             recovered.loc[:, DEFAULT_RECOVERED_MAPPING_COLUMNS],
+        ],
+        ignore_index=True,
+    )
+    return combined.sort_values(["country", "LOCATIONID", "UNITID"], kind="stable").reset_index(
+        drop=True
+    )
+
+
+def build_imputed_wet_unit_cell_mapping(
+    thermal_plants: pd.DataFrame,
+    cooling_mapping: pd.DataFrame,
+    *,
+    random_seed: int = 0,
+) -> pd.DataFrame:
+    """Build a full wet-fleet mapping with explicit exact, inherited, and imputed provenance."""
+
+    missing = REQUIRED_COLUMNS.difference(thermal_plants.columns)
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(f"missing required columns: {missing_list}")
+
+    required_cooling = {"UNITID", "LOCATIONID", "country", "mw", "requires_water", "cooling_physics"}
+    missing_cooling = required_cooling.difference(cooling_mapping.columns)
+    if missing_cooling:
+        missing_list = ", ".join(sorted(missing_cooling))
+        raise ValueError(f"cooling_mapping missing required columns: {missing_list}")
+
+    wet_population = cooling_mapping.loc[cooling_mapping["requires_water"].fillna(False)].copy()
+    wet_population["size_class"] = _classify_size_class(wet_population["mw"])
+    wet_population = wet_population.sort_values(["country", "LOCATIONID", "UNITID"], kind="stable")
+
+    recovered = build_recovered_unit_cell_mapping(thermal_plants)
+    recovered_wet = (
+        recovered.loc[recovered["UNITID"].isin(wet_population["UNITID"])]
+        .copy()
+        .assign(
+            imputation_rule=pd.NA,
+            donor_UNITID=pd.NA,
+            donor_LOCATIONID=pd.NA,
+            donor_country=pd.NA,
+        )
+    )
+
+    unresolved = wet_population.loc[~wet_population["UNITID"].isin(recovered_wet["UNITID"])].copy()
+    if unresolved.empty:
+        return (
+            recovered_wet.loc[:, DEFAULT_IMPUTED_WET_MAPPING_COLUMNS]
+            .sort_values(["country", "LOCATIONID", "UNITID"], kind="stable")
+            .reset_index(drop=True)
+        )
+
+    donor_units = (
+        recovered_wet.merge(
+            wet_population.loc[:, ["UNITID", "LOCATIONID", "country", "cooling_physics", "size_class"]],
+            on=["UNITID", "LOCATIONID", "country"],
+            how="inner",
+            validate="one_to_one",
+        )
+        .reset_index(drop=True)
+    )
+    donor_lookup = _build_donor_lookup(donor_units)
+
+    unresolved_locations = _summarize_unresolved_locations(unresolved)
+    assignments = _assign_imputed_locations(
+        unresolved_locations,
+        donor_units,
+        donor_lookup,
+        random_seed=random_seed,
+    )
+
+    unresolved_with_meta = unresolved.merge(
+        thermal_plants.loc[:, ["UNITID", "LOCATIONID", "lat", "lon"]],
+        on=["UNITID", "LOCATIONID"],
+        how="left",
+        validate="one_to_one",
+    )
+    imputed = unresolved_with_meta.merge(
+        assignments,
+        on="LOCATIONID",
+        how="left",
+        validate="many_to_one",
+    )
+    imputed["coordinate_source"] = "imputed_unit_donor"
+    imputed["location_cell_count"] = 1
+    imputed["location_is_single_cell"] = True
+
+    combined = pd.concat(
+        [
+            recovered_wet.loc[:, DEFAULT_IMPUTED_WET_MAPPING_COLUMNS],
+            imputed.loc[:, DEFAULT_IMPUTED_WET_MAPPING_COLUMNS],
         ],
         ignore_index=True,
     )
@@ -317,6 +437,98 @@ def write_unit_cell_mapping(
     return summary
 
 
+def _classify_size_class(mw: pd.Series) -> pd.Series:
+    return pd.Series(
+        np.where(mw.to_numpy(dtype=float) >= 100.0, "large", "small"),
+        index=mw.index,
+        dtype="object",
+    )
+
+
+def _build_donor_lookup(donor_units: pd.DataFrame) -> dict[str, dict[tuple[object, ...], np.ndarray]]:
+    lookups: dict[str, dict[tuple[object, ...], np.ndarray]] = {}
+
+    for rule_name, columns in WET_IMPUTATION_BACKOFF_RULES:
+        if columns:
+            grouped = donor_units.reset_index().groupby(list(columns))["index"]
+            lookups[rule_name] = {
+                key if isinstance(key, tuple) else (key,): values.to_numpy(dtype=int)
+                for key, values in grouped
+            }
+        else:
+            lookups[rule_name] = {(): donor_units.index.to_numpy(dtype=int)}
+
+    return lookups
+
+
+def _resolve_imputation_candidates(
+    row: pd.Series,
+    donor_lookup: dict[str, dict[tuple[object, ...], np.ndarray]],
+) -> tuple[str, np.ndarray]:
+    for rule_name, columns in WET_IMPUTATION_BACKOFF_RULES:
+        key = tuple(row[column] for column in columns)
+        candidates = donor_lookup[rule_name].get(key, np.array([], dtype=int))
+        if len(candidates) > 0:
+            return rule_name, candidates
+
+    raise ValueError("no donor candidates available for wet-fleet imputation")
+
+
+def _dominant_value(frame: pd.DataFrame, column: str) -> str:
+    weights = (
+        frame.groupby(column, as_index=False)
+        .agg(mw=("mw", "sum"))
+        .sort_values(["mw", column], ascending=[False, True], kind="stable")
+    )
+    return str(weights.iloc[0][column])
+
+
+def _summarize_unresolved_locations(unresolved: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+
+    for location_id, group in unresolved.groupby("LOCATIONID", sort=False):
+        rows.append(
+            {
+                "LOCATIONID": location_id,
+                "country": str(group["country"].iloc[0]),
+                "cooling_physics": _dominant_value(group, "cooling_physics"),
+                "size_class": _dominant_value(group.assign(size_class=group["size_class"]), "size_class"),
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values(["country", "LOCATIONID"], kind="stable").reset_index(drop=True)
+
+
+def _assign_imputed_locations(
+    unresolved_locations: pd.DataFrame,
+    donor_units: pd.DataFrame,
+    donor_lookup: dict[str, dict[tuple[object, ...], np.ndarray]],
+    *,
+    random_seed: int,
+) -> pd.DataFrame:
+    rng = np.random.default_rng(random_seed)
+    rows: list[dict[str, object]] = []
+
+    for location in unresolved_locations.itertuples(index=False):
+        row = pd.Series(location._asdict())
+        rule_name, candidates = _resolve_imputation_candidates(row, donor_lookup)
+        donor = donor_units.iloc[int(rng.choice(candidates))]
+        rows.append(
+            {
+                "LOCATIONID": int(location.LOCATIONID),
+                "grid_lat": float(donor["grid_lat"]),
+                "grid_lon": float(donor["grid_lon"]),
+                "cell_id": str(donor["cell_id"]),
+                "imputation_rule": rule_name,
+                "donor_UNITID": int(donor["UNITID"]),
+                "donor_LOCATIONID": int(donor["LOCATIONID"]),
+                "donor_country": str(donor["country"]),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def write_recovered_unit_cell_mapping(
     source_path: str | Path,
     output_path: str | Path,
@@ -327,6 +539,40 @@ def write_recovered_unit_cell_mapping(
     thermal_plants = pd.read_parquet(Path(source_path))
     mapped = build_recovered_unit_cell_mapping(thermal_plants)
     selected = mapped.loc[:, columns or DEFAULT_RECOVERED_MAPPING_COLUMNS]
+    summary = summarize_mapping(mapped)
+
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    match destination.suffix.lower():
+        case ".parquet":
+            selected.to_parquet(destination, index=False)
+        case ".csv":
+            selected.to_csv(destination, index=False)
+        case _:
+            raise ValueError("output_path must end with .parquet or .csv")
+
+    return summary
+
+
+def write_imputed_wet_unit_cell_mapping(
+    source_path: str | Path,
+    cooling_path: str | Path,
+    output_path: str | Path,
+    columns: list[str] | None = None,
+    *,
+    random_seed: int = 0,
+) -> CellMappingSummary:
+    """Build and write the full wet-fleet mapping with provenance-preserving imputation."""
+
+    thermal_plants = pd.read_parquet(Path(source_path))
+    cooling_mapping = pd.read_parquet(Path(cooling_path))
+    mapped = build_imputed_wet_unit_cell_mapping(
+        thermal_plants,
+        cooling_mapping,
+        random_seed=random_seed,
+    )
+    selected = mapped.loc[:, columns or DEFAULT_IMPUTED_WET_MAPPING_COLUMNS]
     summary = summarize_mapping(mapped)
 
     destination = Path(output_path)
