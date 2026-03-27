@@ -107,7 +107,7 @@ EVAPORATION_COEFFICIENTS = {
 
 @dataclass(frozen=True)
 class WetCoolingAssumptions:
-    """Li et al. default constants for wet-cooling withdrawal calculations."""
+    """Default constants for the Li et al. wet-cooling withdrawal equations."""
 
     water_density_kg_per_m3: float = 1000.0
     water_specific_heat_j_per_g_k: float = 4.184
@@ -243,7 +243,7 @@ def compute_monthly_wet_cooling_impacts(
     *,
     assumptions: WetCoolingAssumptions | None = None,
 ) -> xr.Dataset:
-    """Compute plant-level monthly wet-cooling usable capacity from Li et al."""
+    """Compute plant-level monthly wet-cooling usable capacity from Li et al. (2025)."""
 
     params = assumptions or WetCoolingAssumptions()
     return evaluate_mapped_dataset(
@@ -397,7 +397,11 @@ def _evaluate_wet_cooling_kernel(
             "tower_approach_c": params.tower_approach_c,
             "max_discharge_temp_c": params.max_discharge_temp_c,
             "max_temp_rise_c": params.max_temp_rise_c,
-            "cooling_model_source": "Li et al. 2025 Core_analysis_hydroclimatic_risks.py",
+            "cooling_model_citation": (
+                "Li, S. et al. Global hydroclimatic risks and strategic "
+                "decommissioning pathways for thermal power units. Nature "
+                "Sustainability. https://doi.org/10.1038/s41893-025-01692-9"
+            ),
             "ot_saline_policy": (
                 "ot_saline once-through units are exempt from river-discharge limits and use "
                 "thermal headroom only; freshwater once-through units retain Li's discharge constraint."

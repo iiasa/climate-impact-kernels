@@ -43,11 +43,32 @@ Current thermo-electric artifacts:
 - `data/unit_cooling_mapping.parquet`
   Per-unit technology-to-cooling contract for downstream wet/dry physics.
 
+## Provenance
+
+The thermoelectric mapping artifacts in this package are derived from a
+preconstructed global unit-level fleet table of thermal power plants with unit
+attributes, cooling assignments, and partial coordinate coverage. The package
+materializes contract artifacts from that fleet table rather than reconstructing
+the fleet from raw registries inside this repository.
+
+The wet-cooling kernel follows the withdrawal-intensity and usable-capacity
+framework reported in:
+
+- Li, S. et al. Global hydroclimatic risks and strategic decommissioning
+  pathways for thermal power units. `Nature Sustainability`.
+  https://doi.org/10.1038/s41893-025-01692-9
+
+The dry-cooling kernel follows the dry-cooling efficiency-loss framework
+reported in:
+
+- Qin, Y. et al. Global assessment of the carbon-water tradeoff of dry cooling
+  for thermal power generation. `Nature Water` 1, 682-693.
+  https://doi.org/10.1038/s44221-023-00120-6
+
 ## Spatial Gap
 
-The source fleet in `/home/raghunathan/Li_et_al_2025/thermal_plants.parquet`
-contains `43,031` thermo-electric units. Exact source coordinates exist for
-`25,652` units (`2,596.9 GW`).
+The source fleet table contains `43,031` thermo-electric units. Exact source
+coordinates exist for `25,652` units (`2,596.9 GW`).
 
 The conservative recovery path implemented here adds only units whose missing
 coordinates can be inherited safely from the same `LOCATIONID`. This recovers

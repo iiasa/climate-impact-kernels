@@ -99,7 +99,7 @@ NON_COMBUSTIBLE_FUEL_MARKERS = (
 
 @dataclass(frozen=True)
 class DryCoolingAssumptions:
-    """Screening assumptions for plant-level dry-cooling penalties."""
+    """Default dry-cooling penalty parameters following Qin et al. (2023)."""
 
     combustible_steam_parasitic_load_fraction: float = 0.0243
     combined_cycle_parasitic_load_fraction: float = 0.0081
@@ -246,7 +246,7 @@ def compute_monthly_dry_cooling_impacts(
     *,
     assumptions: DryCoolingAssumptions | None = None,
 ) -> xr.Dataset:
-    """Compute plant-level monthly dry-cooling capacity outcomes."""
+    """Compute plant-level monthly dry-cooling capacity outcomes from Qin et al. (2023)."""
 
     params = assumptions or DryCoolingAssumptions()
     return evaluate_mapped_dataset(
@@ -351,6 +351,11 @@ def _evaluate_dry_cooling_kernel(
             "parasitic_load_source_note": (
                 "Nuclear dry-tower fan penalty uses EPA 2001 Table 3-19 (3.04%); "
                 "non-combustible steam retains the Qin reproduced-table value (0.56%)."
+            ),
+            "cooling_model_citation": (
+                "Qin, Y. et al. Global assessment of the carbon-water tradeoff "
+                "of dry cooling for thermal power generation. Nature Water 1, "
+                "682-693. https://doi.org/10.1038/s44221-023-00120-6"
             ),
             "unsupported_handling": "Units without a Qin steam-cycle family keep capacity_factor=1.0.",
         },
