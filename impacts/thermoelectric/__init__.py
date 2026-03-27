@@ -1,5 +1,10 @@
 """Thermo-electric power mapping utilities."""
 
+from impacts.thermoelectric.aggregation import (
+    aggregate_thermoelectric_file,
+    aggregate_thermoelectric_regions,
+    write_aggregated_thermoelectric_file,
+)
 from impacts.thermoelectric.climate import attach_gridded_dataarray, attach_gridded_dataset
 from impacts.thermoelectric.cooling import (
     DEFAULT_COOLING_COLUMNS,
@@ -52,6 +57,8 @@ from impacts.thermoelectric.wet_cooling import (
 )
 
 __all__ = [
+    "aggregate_thermoelectric_file",
+    "aggregate_thermoelectric_regions",
     "attach_gridded_dataarray",
     "attach_gridded_dataset",
     "build_unit_cooling_mapping",
@@ -88,6 +95,7 @@ __all__ = [
     "WetCoolingAssumptions",
     "create_wet_cooling_kernel",
     "normalize_wet_cooling_climate_inputs",
+    "write_aggregated_thermoelectric_file",
     "write_unit_cooling_mapping",
     "write_country_rollup",
     "write_imputed_dry_unit_cell_mapping",
