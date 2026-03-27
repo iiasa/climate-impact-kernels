@@ -1,6 +1,7 @@
 """Shared computational core for climate-response workflows."""
 
 from climateresponse.baseline import compute_anomaly
+from climateresponse.evaluation import EvaluationResult, evaluate_mapped_dataset
 from climateresponse.contracts import (
     GMTPoint,
     GMTSeries,
@@ -12,11 +13,12 @@ from climateresponse.contracts import (
 )
 from climateresponse.gmt import compute_running_mean
 from climateresponse.response import interpolate_along_warming_level
-from climateresponse.spatial import weighted_average
+from climateresponse.spatial import attach_gridded_dataarray, attach_gridded_dataset, weighted_average
 from climateresponse.stats import deterministic_resampling, weighted_quantiles
 from climateresponse.temporal import (
     CLIMATOLOGICAL_SEASONS,
     aggregate_annual,
+    aggregate_monthly,
     aggregate_seasonal,
 )
 from climateresponse.warming_levels import (
@@ -24,9 +26,11 @@ from climateresponse.warming_levels import (
     bin_by_warming_level,
     match_warming_levels,
 )
+from climateresponse.units import normalize_pressure, normalize_temperature, resolve_unit
 
 __all__ = [
     "CLIMATOLOGICAL_SEASONS",
+    "EvaluationResult",
     "GMTPoint",
     "GMTSeries",
     "GridQuantileResponseSurface",
@@ -35,14 +39,21 @@ __all__ = [
     "WarmingLevelMatch",
     "YearLevelBin",
     "aggregate_annual",
+    "aggregate_monthly",
     "aggregate_seasonal",
+    "attach_gridded_dataarray",
+    "attach_gridded_dataset",
     "assign_years_to_levels",
     "bin_by_warming_level",
     "compute_anomaly",
     "compute_running_mean",
     "deterministic_resampling",
+    "evaluate_mapped_dataset",
     "interpolate_along_warming_level",
     "match_warming_levels",
+    "normalize_pressure",
+    "normalize_temperature",
+    "resolve_unit",
     "weighted_average",
     "weighted_quantiles",
 ]

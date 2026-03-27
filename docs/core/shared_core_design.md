@@ -12,6 +12,9 @@ The package includes:
 - GMT running means and warming-level matching
 - warming-level binning for yearly outputs
 - annual and seasonal aggregation
+- gridded point attachment for mapped entities
+- unit normalization for common climate variables
+- mapped-entity evaluation orchestration for reusable array-native kernels
 - masked spatial weighting
 - response-surface contracts and warming-level interpolation
 - lightweight deterministic statistics helpers
