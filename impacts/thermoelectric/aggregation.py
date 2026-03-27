@@ -118,11 +118,12 @@ def aggregate_thermoelectric_file(
     """Open and aggregate a thermoelectric NetCDF file to the requested regions."""
 
     with xr.open_dataset(Path(source_path), chunks=chunks) as dataset:
+        # Load only the reduced result so callers do not keep the full source file in memory.
         return aggregate_thermoelectric_regions(
-            dataset.load(),
+            dataset,
             region_set=region_set,
             strict=strict,
-        )
+        ).load()
 
 
 def write_aggregated_thermoelectric_file(
@@ -165,6 +166,8 @@ def _variable_reductions(
         if name in weighted:
             reductions[name] = "weighted_mean"
             continue
+        # NB: defaulting unknown entity-level variables to MW-weighted means is permissive.
+        # Tighten this to an explicit contract once the production variable set is fixed.
         reductions[name] = "weighted_mean"
 
     return reductions
