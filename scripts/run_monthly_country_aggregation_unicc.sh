@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=cooling_country
-#SBATCH --time=04:00:00
+#SBATCH --time=00:10:00
 #SBATCH --mem=24G
 #SBATCH --cpus-per-task=2
 #SBATCH --array=0-39
@@ -39,8 +39,6 @@ if [ ! -d "$VENV_DIR/bin" ]; then
     VIRTUAL_ENV="$VENV_DIR" uv pip install --no-deps wheels/*.whl
     VIRTUAL_ENV="$VENV_DIR" uv pip install numpy pandas xarray pyarrow netcdf4 cftime dask
 fi
-LATEST_IMPACTS_WHEEL=$(ls -t wheels/impacts-*.whl | head -n1)
-VIRTUAL_ENV="$VENV_DIR" uv pip install --no-deps "$LATEST_IMPACTS_WHEEL" --reinstall
 flock -u 9
 
 "$VENV_DIR/bin/python" run_monthly_country_aggregation.py \
