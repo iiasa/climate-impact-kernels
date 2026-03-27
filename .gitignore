@@ -14,3 +14,10 @@ htmlcov/
 
 # Virtual environments
 .venv
+
+# Licensed local-only WEPP/PLATTS-derived artifacts
+data/country_rollup.parquet
+data/imputed_wet_unit_cell_mapping.parquet
+data/location_cell_mapping.parquet
+data/unit_cell_mapping.parquet
+data/unit_cooling_mapping.parquet
