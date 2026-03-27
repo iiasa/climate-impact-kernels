@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cooling_country
 #SBATCH --time=04:00:00
-#SBATCH --mem=64G
+#SBATCH --mem=24G
 #SBATCH --cpus-per-task=2
 #SBATCH --array=0-39
 #SBATCH --output=/home/raghunathan/job/cooling_country_monthly/logs/%A_%a.out
