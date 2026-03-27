@@ -14,13 +14,3 @@ htmlcov/
 
 # Virtual environments
 .venv
-
-# Local validation/reference artifacts
-Li DATA/
-output/
-data/imputed_dry_unit_cell_mapping.parquet
-validation/run_hot_country_location_sensitivity.py
-validation/run_hot_country_location_sensitivity_unicc.sh
-validation/run_production_case.py
-validation/run_production_dry_array_unicc.sh
-validation/run_production_wet_array_unicc.sh
