@@ -22,15 +22,16 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from impacts.runner import evaluate_kernel
 from impacts.thermoelectric.dry_cooling import (
     DryCoolingAssumptions,
     build_dry_cooling_mapping,
-    compute_monthly_dry_cooling_impacts,
+    create_dry_cooling_kernel,
 )
 from impacts.thermoelectric.wet_cooling import (
     WetCoolingAssumptions,
     build_wet_cooling_mapping,
-    compute_monthly_wet_cooling_impacts,
+    create_wet_cooling_kernel,
 )
 
 # ── Physical constants (Li script lines 19-29) ──────────────────────────────
@@ -273,7 +274,7 @@ def _build_wet_kernel_outputs(cases: list) -> xr.Dataset:
         },
         coords={"time": pd.date_range("2001-01-01", periods=1, freq="MS"), "lat": lats, "lon": lons},
     )
-    return compute_monthly_wet_cooling_impacts(wet_map, climate)
+    return evaluate_kernel(create_wet_cooling_kernel(), wet_map, climate, duration="monthly")
 
 
 def _build_dry_kernel_outputs(cases: list) -> xr.Dataset:
@@ -299,7 +300,7 @@ def _build_dry_kernel_outputs(cases: list) -> xr.Dataset:
         {"tas": (["time", "lat", "lon"], tas, {"units": "C"})},
         coords={"time": pd.date_range("2001-01-01", periods=1, freq="MS"), "lat": lats, "lon": lons},
     )
-    return compute_monthly_dry_cooling_impacts(dry_map, climate)
+    return evaluate_kernel(create_dry_cooling_kernel(), dry_map, climate, duration="monthly")
 
 
 # ── Comparison logic ─────────────────────────────────────────────────────────

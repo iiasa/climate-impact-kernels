@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 from climateresponse import (
     EvaluationResult,
-    aggregate_seasonal,
-    evaluate_mapped_dataset,
     normalize_pressure,
     normalize_temperature,
     resolve_unit,
 )
+from impacts.runner import ImpactKernel
 from impacts.thermoelectric._cooling_common import (
     join_country_from_cooling,
     validate_unique_units,
@@ -222,35 +222,16 @@ def build_wet_cooling_mapping(
     return wet.sort_values(["country", "LOCATIONID", "UNITID"], kind="stable").reset_index(drop=True)
 
 
-def attach_wet_cooling_climate(
-    wet_cooling_mapping: pd.DataFrame,
-    climate_inputs: xr.Dataset,
-) -> xr.Dataset:
-    """Attach normalized wet-cooling climate series to plant-level mappings."""
-
-    return evaluate_mapped_dataset(
-        wet_cooling_mapping,
-        climate_inputs,
-        normalize_inputs=lambda dataset: dataset,
-        physics_kernel=lambda attached: attached,
-        metadata_columns=WET_METADATA_COLUMNS,
-    )
-
-
-def compute_monthly_wet_cooling_impacts(
-    wet_cooling_mapping: pd.DataFrame,
-    climate_inputs: xr.Dataset,
-    *,
+def create_wet_cooling_kernel(
     assumptions: WetCoolingAssumptions | None = None,
-) -> xr.Dataset:
-    """Compute plant-level monthly wet-cooling usable capacity from Li et al. (2025)."""
+) -> ImpactKernel:
+    """Build the Li et al. wet-cooling mapped-kernel contract."""
 
     params = assumptions or WetCoolingAssumptions()
-    return evaluate_mapped_dataset(
-        wet_cooling_mapping,
-        climate_inputs,
+    return ImpactKernel(
+        name="wet_cooling",
         normalize_inputs=normalize_wet_cooling_climate_inputs,
-        physics_kernel=lambda attached: _evaluate_wet_cooling_kernel(attached, params=params),
+        physics_kernel=partial(_evaluate_wet_cooling_kernel, params=params),
         metadata_columns=WET_METADATA_COLUMNS,
         clips={
             "capacity_factor": (0.0, 1.0),
@@ -258,16 +239,6 @@ def compute_monthly_wet_cooling_impacts(
             "usable_capacity_mw": (0.0, None),
         },
     )
-
-
-def aggregate_seasonal_wet_cooling_impacts(
-    monthly_impacts: xr.Dataset,
-    *,
-    seasons: Mapping[str, tuple[int, ...]] | None = None,
-) -> xr.Dataset:
-    """Aggregate monthly wet-cooling outputs into seasonal means."""
-
-    return aggregate_seasonal(monthly_impacts, seasons=seasons)
 
 
 def _evaluate_wet_cooling_kernel(

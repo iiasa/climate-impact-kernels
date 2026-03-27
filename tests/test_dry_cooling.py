@@ -6,10 +6,10 @@ import unittest
 import pandas as pd
 import xarray as xr
 
+from impacts.runner import evaluate_kernel
 from impacts.thermoelectric.dry_cooling import (
-    aggregate_seasonal_dry_cooling_impacts,
     build_dry_cooling_mapping,
-    compute_monthly_dry_cooling_impacts,
+    create_dry_cooling_kernel,
     normalize_dry_cooling_climate_inputs,
 )
 
@@ -109,7 +109,7 @@ class DryCoolingContractTest(unittest.TestCase):
 
     def test_compute_monthly_dry_cooling_impacts_returns_capacity_outputs(self) -> None:
         mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = compute_monthly_dry_cooling_impacts(mapping, self.climate)
+        monthly = evaluate_kernel(create_dry_cooling_kernel(), mapping, self.climate, duration="monthly")
 
         self.assertEqual(monthly.sizes["entity"], 4)
         self.assertEqual(monthly["capacity_factor"].dims, ("time", "entity"))
@@ -149,12 +149,11 @@ class DryCoolingContractTest(unittest.TestCase):
 
     def test_aggregate_seasonal_dry_cooling_impacts_uses_climateresponse(self) -> None:
         mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = compute_monthly_dry_cooling_impacts(mapping, self.climate)
-
-        seasonal = aggregate_seasonal_dry_cooling_impacts(monthly)
+        seasonal = evaluate_kernel(create_dry_cooling_kernel(), mapping, self.climate, duration="seasonal")
 
         self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
         self.assertEqual(seasonal.coords["season"].values.tolist(), ["DJF", "MAM", "JJA", "SON"])
+        monthly = evaluate_kernel(create_dry_cooling_kernel(), mapping, self.climate, duration="monthly")
         self.assertAlmostEqual(
             seasonal["capacity_factor"].sel(season="DJF", year=2001, entity=101).item(),
             monthly["capacity_factor"].sel(entity=101).isel(time=slice(0, 2)).mean().item(),
@@ -188,7 +187,7 @@ class DryCoolingDaskTest(DryCoolingContractTest):
 
     def test_compute_monthly_dry_cooling_impacts_returns_capacity_outputs(self) -> None:
         mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = compute_monthly_dry_cooling_impacts(mapping, self.climate).compute()
+        monthly = evaluate_kernel(create_dry_cooling_kernel(), mapping, self.climate, duration="monthly").compute()
 
         self.assertEqual(monthly.sizes["entity"], 4)
         combustible_steam = monthly["capacity_factor"].sel(entity=101)
@@ -203,8 +202,7 @@ class DryCoolingDaskTest(DryCoolingContractTest):
 
     def test_aggregate_seasonal_dry_cooling_impacts_uses_climateresponse(self) -> None:
         mapping = build_dry_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = compute_monthly_dry_cooling_impacts(mapping, self.climate).compute()
-        seasonal = aggregate_seasonal_dry_cooling_impacts(monthly)
+        seasonal = evaluate_kernel(create_dry_cooling_kernel(), mapping, self.climate, duration="seasonal").compute()
         self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
 
 

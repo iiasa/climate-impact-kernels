@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from impacts.runner import run_impact_matrix
+from impacts.runner import ImpactKernel, evaluate_kernel, run_impact_matrix
 
 
 def _synthetic_loader(gcm: str, scenario: str) -> xr.Dataset:
@@ -21,16 +21,29 @@ def _synthetic_loader(gcm: str, scenario: str) -> xr.Dataset:
     )
 
 
-def _synthetic_kernel(mapping: pd.DataFrame, climate: xr.Dataset) -> xr.Dataset:
-    """Trivial kernel: return mean temperature per entity."""
-    n_entities = len(mapping)
-    n_times = climate.sizes["time"]
+def _identity(dataset: xr.Dataset) -> xr.Dataset:
+    return dataset
+
+
+def _synthetic_physics_kernel(attached: xr.Dataset) -> xr.Dataset:
+    """Trivial kernel: return a unit capacity factor for every mapped entity."""
+    n_entities = attached.sizes["entity"]
+    n_times = attached.sizes["time"]
     return xr.Dataset(
         {"capacity_factor": (["time", "entity"], np.ones((n_times, n_entities)))},
         coords={
-            "time": climate.time,
-            "entity": mapping["UNITID"].tolist(),
+            "time": attached.time,
+            "entity": attached.entity,
         },
+    )
+
+
+def _synthetic_kernel() -> ImpactKernel:
+    return ImpactKernel(
+        name="synthetic",
+        normalize_inputs=_identity,
+        physics_kernel=_synthetic_physics_kernel,
+        metadata_columns=("UNITID",),
     )
 
 
@@ -43,11 +56,18 @@ class RunnerContractTest(unittest.TestCase):
             "mw": [100.0, 200.0],
         })
 
+    def test_evaluate_kernel_aggregates_requested_duration(self) -> None:
+        monthly = evaluate_kernel(_synthetic_kernel(), self.mapping, _synthetic_loader("A", "hist"), duration="monthly")
+        seasonal = evaluate_kernel(_synthetic_kernel(), self.mapping, _synthetic_loader("A", "hist"), duration="seasonal")
+
+        self.assertEqual(monthly["capacity_factor"].dims, ("time", "entity"))
+        self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
+
     def test_run_impact_matrix_produces_output_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
             paths = run_impact_matrix(
-                kernel=_synthetic_kernel,
+                kernel=_synthetic_kernel(),
                 mapping=self.mapping,
                 loader=_synthetic_loader,
                 gcms=["GCM_A"],
@@ -70,7 +90,7 @@ class RunnerContractTest(unittest.TestCase):
             xr.Dataset({"dummy": 1}).to_netcdf(existing)
 
             paths = run_impact_matrix(
-                kernel=_synthetic_kernel,
+                kernel=_synthetic_kernel(),
                 mapping=self.mapping,
                 loader=_synthetic_loader,
                 gcms=["GCM_A"],
@@ -84,29 +104,26 @@ class RunnerContractTest(unittest.TestCase):
             self.assertNotIn("capacity_factor", ds.data_vars)
             ds.close()
 
-    def test_run_impact_matrix_applies_post_process(self) -> None:
-        def add_summary(ds: xr.Dataset) -> xr.Dataset:
-            return ds.assign(mean_cf=ds["capacity_factor"].mean("time"))
-
+    def test_run_impact_matrix_respects_duration(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             paths = run_impact_matrix(
-                kernel=_synthetic_kernel,
+                kernel=_synthetic_kernel(),
                 mapping=self.mapping,
                 loader=_synthetic_loader,
                 gcms=["GCM_A"],
                 scenarios=["hist"],
                 output_dir=Path(tmpdir),
-                post_process=add_summary,
+                duration="seasonal",
             )
             ds = xr.open_dataset(paths[0])
-            self.assertIn("mean_cf", ds.data_vars)
+            self.assertEqual(ds["capacity_factor"].dims, ("season", "year", "entity"))
             ds.close()
 
     def test_run_impact_matrix_creates_output_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             nested = Path(tmpdir) / "a" / "b" / "c"
             paths = run_impact_matrix(
-                kernel=_synthetic_kernel,
+                kernel=_synthetic_kernel(),
                 mapping=self.mapping,
                 loader=_synthetic_loader,
                 gcms=["GCM_A"],
@@ -123,7 +140,7 @@ class RunnerContractTest(unittest.TestCase):
             existing.write_text("not a netcdf file")
 
             paths = run_impact_matrix(
-                kernel=_synthetic_kernel,
+                kernel=_synthetic_kernel(),
                 mapping=self.mapping,
                 loader=_synthetic_loader,
                 gcms=["GCM_A"],
@@ -150,7 +167,7 @@ class RunnerContractTest(unittest.TestCase):
             with patch.object(xr.Dataset, "to_netcdf", new=failing_write):
                 with self.assertRaisesRegex(OSError, "disk full"):
                     run_impact_matrix(
-                        kernel=_synthetic_kernel,
+                        kernel=_synthetic_kernel(),
                         mapping=self.mapping,
                         loader=_synthetic_loader,
                         gcms=["GCM_A"],

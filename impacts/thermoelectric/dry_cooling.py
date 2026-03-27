@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 from climateresponse import (
     EvaluationResult,
-    aggregate_seasonal,
-    evaluate_mapped_dataset,
     normalize_temperature,
     resolve_unit,
 )
+from impacts.runner import ImpactKernel
 from impacts.thermoelectric._cooling_common import (
     join_country_from_cooling,
     validate_unique_units,
@@ -225,35 +225,16 @@ def build_dry_cooling_mapping(
     )
 
 
-def attach_dry_cooling_climate(
-    dry_cooling_mapping: pd.DataFrame,
-    climate_inputs: xr.Dataset,
-) -> xr.Dataset:
-    """Attach normalized dry-cooling climate series to plant-level mappings."""
-
-    return evaluate_mapped_dataset(
-        dry_cooling_mapping,
-        climate_inputs,
-        normalize_inputs=lambda dataset: dataset,
-        physics_kernel=lambda attached: attached,
-        metadata_columns=DRY_METADATA_COLUMNS,
-    )
-
-
-def compute_monthly_dry_cooling_impacts(
-    dry_cooling_mapping: pd.DataFrame,
-    climate_inputs: xr.Dataset,
-    *,
+def create_dry_cooling_kernel(
     assumptions: DryCoolingAssumptions | None = None,
-) -> xr.Dataset:
-    """Compute plant-level monthly dry-cooling capacity outcomes from Qin et al. (2023)."""
+) -> ImpactKernel:
+    """Build the Qin et al. dry-cooling mapped-kernel contract."""
 
     params = assumptions or DryCoolingAssumptions()
-    return evaluate_mapped_dataset(
-        dry_cooling_mapping,
-        climate_inputs,
+    return ImpactKernel(
+        name="dry_cooling",
         normalize_inputs=normalize_dry_cooling_climate_inputs,
-        physics_kernel=lambda attached: _evaluate_dry_cooling_kernel(attached, params=params),
+        physics_kernel=partial(_evaluate_dry_cooling_kernel, params=params),
         metadata_columns=DRY_METADATA_COLUMNS,
         clips={
             "efficiency_loss": (0.0, None),
@@ -262,16 +243,6 @@ def compute_monthly_dry_cooling_impacts(
             "capacity_loss": (0.0, 1.0),
         },
     )
-
-
-def aggregate_seasonal_dry_cooling_impacts(
-    monthly_impacts: xr.Dataset,
-    *,
-    seasons: Mapping[str, tuple[int, ...]] | None = None,
-) -> xr.Dataset:
-    """Aggregate monthly dry-cooling outputs into seasonal means."""
-
-    return aggregate_seasonal(monthly_impacts, seasons=seasons)
 
 
 def _evaluate_dry_cooling_kernel(

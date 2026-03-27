@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import time
-from functools import partial
 from pathlib import Path
 
 import pandas as pd
@@ -22,11 +21,11 @@ from impacts.isimip import (
 from impacts.runner import run_impact_matrix
 from impacts.thermoelectric.dry_cooling import (
     build_dry_cooling_mapping,
-    compute_monthly_dry_cooling_impacts,
+    create_dry_cooling_kernel,
 )
 from impacts.thermoelectric.wet_cooling import (
     build_wet_cooling_mapping,
-    compute_monthly_wet_cooling_impacts,
+    create_wet_cooling_kernel,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -55,7 +54,7 @@ print(f"  Engine types: {dry_map['dry_cooling_engine_type'].value_counts().to_di
 
 t0 = time.time()
 dry_paths = run_impact_matrix(
-    kernel=partial(compute_monthly_dry_cooling_impacts),
+    kernel=create_dry_cooling_kernel(),
     mapping=dry_map,
     loader=lambda gcm, scenario: load_isimip_dataset(
         DRY_COOLING_VARIABLES, gcm, scenario, paths, year_range=YEAR_RANGE,
@@ -80,7 +79,7 @@ print(f"  Cooling types: {wet_map['cooling_physics'].value_counts().to_dict()}")
 
 t0 = time.time()
 wet_paths = run_impact_matrix(
-    kernel=partial(compute_monthly_wet_cooling_impacts),
+    kernel=create_wet_cooling_kernel(),
     mapping=wet_map,
     loader=lambda gcm, scenario: load_isimip_dataset(
         WET_COOLING_VARIABLES, gcm, scenario, paths, year_range=YEAR_RANGE,
