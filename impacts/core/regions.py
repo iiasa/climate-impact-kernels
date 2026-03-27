@@ -220,13 +220,13 @@ def aggregate_entity_dataarray(
                 region_dim=region_dim,
                 region_labels=region_labels,
             )
-            numerator = (values * weight_values).assign_coords({region_dim: labels}).groupby(region_dim).sum(
-                dim=entity_dim
+            return _aggregate_weighted_mean(
+                values=values,
+                weights=weight_values,
+                labels=labels,
+                entity_dim=entity_dim,
+                region_dim=region_dim,
             )
-            denominator = weight_values.groupby(region_dim).sum(dim=entity_dim)
-            if bool((denominator <= 0).any()):
-                raise ValueError("total weight must be positive for every region")
-            return numerator / denominator
         case _:
             raise ValueError(f"unsupported reduction: {reduction!r}")
 
@@ -300,6 +300,24 @@ def _normalized_message_r12_lookup() -> dict[str, str]:
         _normalize_member_name(country): region
         for country, region in message_r12_country_to_region().items()
     }
+
+
+def _aggregate_weighted_mean(
+    *,
+    values: xr.DataArray,
+    weights: xr.DataArray,
+    labels: xr.DataArray,
+    entity_dim: str,
+    region_dim: str,
+) -> xr.DataArray:
+    weighted_values = (values * weights).assign_coords({region_dim: labels})
+    numerator = weighted_values.groupby(region_dim).sum(dim=entity_dim)
+    denominator = weights.groupby(region_dim).sum(dim=entity_dim)
+
+    if bool((denominator <= 0).any()):
+        raise ValueError("total weight must be positive for every region")
+
+    return numerator / denominator
 
 
 def _labels_dataarray(
