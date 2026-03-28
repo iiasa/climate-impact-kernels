@@ -16,6 +16,9 @@ AGENTS.md
 # Virtual environments
 .venv
 
+# Local staging (UniCC SLURM scripts, smoke tests, ad-hoc drivers)
+_staging/
+
 # Licensed local-only WEPP/PLATTS-derived artifacts
 data/country_rollup.parquet
 data/imputed_wet_unit_cell_mapping.parquet
