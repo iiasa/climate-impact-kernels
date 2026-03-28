@@ -54,20 +54,6 @@ def isimip3b_paths(watxene_root: Path | None = None) -> ISIMIPPaths:
         watergap_root=isimip3b / "OutputData" / "WaterGAP2-2e",
     )
 
-# ── Pre-defined variable sets for cooling pipelines ──────────────────────────
-
-WET_COOLING_VARIABLES = (
-    ISIMIPVariable("tas", "climate", "daily"),
-    ISIMIPVariable("hurs", "climate", "daily"),
-    ISIMIPVariable("ps", "climate", "daily"),
-    ISIMIPVariable("dis", "watergap", "daily"),
-    ISIMIPVariable("triver", "watergap", "monthly", output_name="tw"),
-)
-
-DRY_COOLING_VARIABLES = (
-    ISIMIPVariable("tas", "climate", "daily"),
-)
-
 ISIMIP3B_GCMS = (
     "GFDL-ESM4",
     "IPSL-CM6A-LR",

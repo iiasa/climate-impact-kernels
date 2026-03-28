@@ -1,3 +1,3 @@
 """Climate-impact domains."""
 
-__all__ = ["landuse", "thermoelectric"]
+__all__ = ["thermoelectric"]

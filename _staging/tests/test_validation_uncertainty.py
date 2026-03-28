@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from impacts.thermoelectric.validation_uncertainty import (
+from _staging.thermoelectric.validation_uncertainty import (
     add_size_class,
     assess_benchmark_interval,
     sample_missing_unit_outcomes,

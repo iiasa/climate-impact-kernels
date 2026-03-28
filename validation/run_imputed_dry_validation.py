@@ -25,10 +25,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from impacts.isimip import DRY_COOLING_VARIABLES, isimip3b_paths, load_isimip_dataset
-from impacts.runner import evaluate_kernel
+from impacts.kernel import evaluate_kernel
 from impacts.thermoelectric import build_dry_cooling_mapping, create_dry_cooling_kernel
-from impacts.thermoelectric.validation_uncertainty import add_size_class, summarise_metrics
+from impacts.thermoelectric import DRY_COOLING_VARIABLES
+from impacts.isimip import isimip3b_paths, load_isimip_dataset
+from _staging.thermoelectric.validation_uncertainty import add_size_class, summarise_metrics
 
 GCMS = ["GFDL-ESM4", "IPSL-CM6A-LR", "MPI-ESM1-2-HR", "MRI-ESM2-0", "UKESM1-0-LL"]
 REDUCED_SCENARIOS = {

@@ -6,8 +6,8 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from impacts.runner import evaluate_kernel
-from impacts.thermoelectric.dry_cooling import (
+from impacts.kernel import evaluate_kernel
+from impacts.thermoelectric.dry import (
     build_dry_cooling_mapping,
     create_dry_cooling_kernel,
     normalize_dry_cooling_climate_inputs,

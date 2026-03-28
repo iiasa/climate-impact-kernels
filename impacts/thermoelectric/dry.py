@@ -12,8 +12,9 @@ from climateresponse import (
     normalize_temperature,
     resolve_unit,
 )
-from impacts.runner import ImpactKernel
-from impacts.thermoelectric._cooling_common import (
+from impacts.isimip import ISIMIPVariable
+from impacts.kernel import ImpactKernel
+from impacts.thermoelectric._common import (
     join_country_from_cooling,
     validate_unique_units,
 )
@@ -23,6 +24,10 @@ REQUIRED_DRY_COOLING_VARIABLES = frozenset({"air_temperature_k"})
 DEFAULT_DRY_COOLING_VARIABLE_NAMES = {
     "air_temperature_k": "tas",
 }
+
+DRY_COOLING_VARIABLES = (
+    ISIMIPVariable("tas", "climate", "daily"),
+)
 
 REQUIRED_DRY_MAPPING_COLUMNS = frozenset(
     {

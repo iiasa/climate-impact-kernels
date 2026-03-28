@@ -5,15 +5,15 @@ from impacts.thermoelectric.aggregation import (
     aggregate_thermoelectric_regions,
     write_aggregated_thermoelectric_file,
 )
-from impacts.thermoelectric.climate import attach_gridded_dataarray, attach_gridded_dataset
 from impacts.thermoelectric.cooling import (
     DEFAULT_COOLING_COLUMNS,
     build_unit_cooling_mapping,
     classify_technology_family,
     write_unit_cooling_mapping,
 )
-from impacts.thermoelectric.dry_cooling import (
+from impacts.thermoelectric.dry import (
     DEFAULT_DRY_COOLING_VARIABLE_NAMES,
+    DRY_COOLING_VARIABLES,
     REQUIRED_DRY_COOLING_VARIABLES,
     DryCoolingAssumptions,
     build_dry_cooling_mapping,
@@ -47,8 +47,9 @@ from impacts.thermoelectric.mapping import (
     write_recovered_unit_cell_mapping,
     write_unit_cell_mapping,
 )
-from impacts.thermoelectric.wet_cooling import (
+from impacts.thermoelectric.wet import (
     DEFAULT_ISIMIP_VARIABLE_NAMES,
+    WET_COOLING_VARIABLES,
     REQUIRED_WET_COOLING_VARIABLES,
     WetCoolingAssumptions,
     build_wet_cooling_mapping,
@@ -59,8 +60,6 @@ from impacts.thermoelectric.wet_cooling import (
 __all__ = [
     "aggregate_thermoelectric_file",
     "aggregate_thermoelectric_regions",
-    "attach_gridded_dataarray",
-    "attach_gridded_dataset",
     "build_unit_cooling_mapping",
     "classify_technology_family",
     "CellMappingSummary",
@@ -69,10 +68,17 @@ __all__ = [
     "DEFAULT_DRY_COOLING_VARIABLE_NAMES",
     "DEFAULT_IMPUTED_DRY_MAPPING_COLUMNS",
     "DEFAULT_IMPUTED_WET_MAPPING_COLUMNS",
+    "DEFAULT_ISIMIP_VARIABLE_NAMES",
     "DEFAULT_LOCATION_COLUMNS",
     "DEFAULT_MAPPING_COLUMNS",
     "DEFAULT_RECOVERED_MAPPING_COLUMNS",
     "LocationAmbiguity",
+    "DRY_COOLING_VARIABLES",
+    "DryCoolingAssumptions",
+    "REQUIRED_DRY_COOLING_VARIABLES",
+    "REQUIRED_WET_COOLING_VARIABLES",
+    "WET_COOLING_VARIABLES",
+    "WetCoolingAssumptions",
     "build_country_rollup",
     "build_dry_cooling_mapping",
     "build_imputed_dry_unit_cell_mapping",
@@ -86,13 +92,8 @@ __all__ = [
     "snap_to_half_degree_cell",
     "summarize_location_ambiguity",
     "summarize_mapping",
-    "REQUIRED_DRY_COOLING_VARIABLES",
-    "DryCoolingAssumptions",
     "create_dry_cooling_kernel",
     "normalize_dry_cooling_climate_inputs",
-    "DEFAULT_ISIMIP_VARIABLE_NAMES",
-    "REQUIRED_WET_COOLING_VARIABLES",
-    "WetCoolingAssumptions",
     "create_wet_cooling_kernel",
     "normalize_wet_cooling_climate_inputs",
     "write_aggregated_thermoelectric_file",

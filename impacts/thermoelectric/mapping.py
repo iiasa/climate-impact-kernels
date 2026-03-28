@@ -284,7 +284,7 @@ def build_imputed_dry_unit_cell_mapping(
         missing_list = ", ".join(sorted(missing_cooling))
         raise ValueError(f"cooling_mapping missing required columns: {missing_list}")
 
-    from impacts.thermoelectric.dry_cooling import classify_dry_cooling_engine_type
+    from impacts.thermoelectric.dry import classify_dry_cooling_engine_type
 
     dry_population = cooling_mapping.loc[cooling_mapping["cooling_physics"].eq("dry")].copy()
     support_flags = dry_population.apply(

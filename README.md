@@ -3,7 +3,6 @@
 Current domains:
 
 - `impacts.thermoelectric`
-- `impacts.landuse`
 
 The package is a library of domain contracts and transformations, not a
 pipeline CLI.
@@ -56,14 +55,14 @@ framework reported in:
 
 - Li, S. et al. Global hydroclimatic risks and strategic decommissioning
   pathways for thermal power units. `Nature Sustainability`.
-  https://doi.org/10.1038/s41893-025-01692-9
+  <https://doi.org/10.1038/s41893-025-01692-9>
 
 The dry-cooling kernel follows the dry-cooling efficiency-loss framework
 reported in:
 
 - Qin, Y. et al. Global assessment of the carbon-water tradeoff of dry cooling
   for thermal power generation. `Nature Water` 1, 682-693.
-  https://doi.org/10.1038/s44221-023-00120-6
+  <https://doi.org/10.1038/s44221-023-00120-6>
 
 ## Spatial Gap
 

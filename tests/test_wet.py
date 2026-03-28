@@ -6,8 +6,8 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from impacts.runner import evaluate_kernel
-from impacts.thermoelectric.wet_cooling import (
+from impacts.kernel import evaluate_kernel
+from impacts.thermoelectric.wet import (
     WetCoolingAssumptions,
     build_wet_cooling_mapping,
     create_wet_cooling_kernel,

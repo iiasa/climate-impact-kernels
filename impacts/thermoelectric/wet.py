@@ -13,8 +13,9 @@ from climateresponse import (
     normalize_temperature,
     resolve_unit,
 )
-from impacts.runner import ImpactKernel
-from impacts.thermoelectric._cooling_common import (
+from impacts.isimip import ISIMIPVariable
+from impacts.kernel import ImpactKernel
+from impacts.thermoelectric._common import (
     join_country_from_cooling,
     validate_unique_units,
 )
@@ -36,6 +37,14 @@ DEFAULT_ISIMIP_VARIABLE_NAMES = {
     "relative_humidity": "hurs",
     "surface_pressure": "ps",
 }
+
+WET_COOLING_VARIABLES = (
+    ISIMIPVariable("tas", "climate", "daily"),
+    ISIMIPVariable("hurs", "climate", "daily"),
+    ISIMIPVariable("ps", "climate", "daily"),
+    ISIMIPVariable("dis", "watergap", "daily"),
+    ISIMIPVariable("triver", "watergap", "monthly", output_name="tw"),
+)
 
 REQUIRED_WET_MAPPING_COLUMNS = frozenset(
     {
