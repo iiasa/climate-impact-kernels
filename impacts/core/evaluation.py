@@ -50,6 +50,46 @@ def evaluate_mapped_dataset(
     return evaluated
 
 
+def evaluate_gridded_dataset(
+    climate_inputs: xr.Dataset,
+    parameters: xr.Dataset,
+    *,
+    normalize_inputs: Callable[[xr.Dataset], xr.Dataset],
+    physics_kernel: Callable[[xr.Dataset], xr.Dataset | EvaluationResult],
+    spatial_dims: tuple[str, ...] = ("lat", "lon"),
+    entity_dim: str = "entity",
+    clips: Mapping[str, tuple[float | None, float | None]] | None = None,
+    transpose_order: tuple[str, ...] = ("time", "entity"),
+) -> xr.Dataset:
+    """Normalize, stack spatial dims to entity, attach parameters, evaluate, clip."""
+
+    normalized = normalize_inputs(climate_inputs)
+    stacked = normalized.stack({entity_dim: spatial_dims})
+
+    param_coords: dict[str, xr.DataArray] = {}
+    for name in parameters.data_vars:
+        param = parameters[name]
+        if set(spatial_dims).issubset(param.dims):
+            param_coords[name] = param.stack({entity_dim: spatial_dims})
+        else:
+            param_coords[name] = param
+
+    attached = stacked.assign_coords(param_coords)
+    evaluated = _coerce_result(
+        result=physics_kernel(attached),
+        coords=attached.coords,
+    )
+
+    for variable_name, (lower, upper) in (clips or {}).items():
+        if variable_name not in evaluated.data_vars:
+            raise ValueError(f"{variable_name!r} not returned by physics_kernel")
+        evaluated[variable_name] = evaluated[variable_name].clip(min=lower, max=upper)
+
+    if all(dim in evaluated.dims for dim in transpose_order):
+        return evaluated.transpose(*transpose_order)
+    return evaluated
+
+
 def _coerce_result(
     *,
     result: xr.Dataset | EvaluationResult,

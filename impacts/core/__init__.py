@@ -1,7 +1,7 @@
 """Shared computational core for climate-response workflows."""
 
 from climateresponse.baseline import compute_anomaly
-from climateresponse.evaluation import EvaluationResult, evaluate_mapped_dataset
+from climateresponse.evaluation import EvaluationResult, evaluate_gridded_dataset, evaluate_mapped_dataset
 from climateresponse.contracts import (
     GMTPoint,
     GMTSeries,
@@ -48,6 +48,7 @@ __all__ = [
     "compute_anomaly",
     "compute_running_mean",
     "deterministic_resampling",
+    "evaluate_gridded_dataset",
     "evaluate_mapped_dataset",
     "interpolate_along_warming_level",
     "match_warming_levels",
