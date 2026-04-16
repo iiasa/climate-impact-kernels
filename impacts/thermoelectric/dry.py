@@ -10,10 +10,9 @@ import xarray as xr
 from climateresponse import (
     EvaluationResult,
     normalize_temperature,
-    resolve_unit,
 )
 from impacts.isimip import ISIMIPVariable
-from impacts.kernel import ImpactKernel
+from impacts.kernel import ImpactKernel, normalize_climate_inputs
 from impacts.thermoelectric._common import (
     join_country_from_cooling,
     validate_unique_units,
@@ -113,6 +112,11 @@ class DryCoolingAssumptions:
     unsupported_capacity_factor: float = 1.0
 
 
+DRY_COOLING_NORMALIZATIONS = (
+    ("air_temperature_k", "K", normalize_temperature),
+)
+
+
 def normalize_dry_cooling_climate_inputs(
     dataset: xr.Dataset,
     *,
@@ -121,24 +125,13 @@ def normalize_dry_cooling_climate_inputs(
 ) -> xr.Dataset:
     """Select, rename, and normalize the climate inputs required by dry cooling."""
 
-    variables = dict(DEFAULT_DRY_COOLING_VARIABLE_NAMES)
-    if variable_names is not None:
-        variables.update(variable_names)
-
-    missing = [source_name for source_name in variables.values() if source_name not in dataset.data_vars]
-    if missing:
-        missing_list = ", ".join(sorted(missing))
-        raise ValueError(f"dataset missing required climate variables: {missing_list}")
-
-    normalized = dataset[list(variables.values())].rename(
-        {source_name: target_name for target_name, source_name in variables.items()}
+    return normalize_climate_inputs(
+        dataset,
+        default_variable_names=DEFAULT_DRY_COOLING_VARIABLE_NAMES,
+        normalizations=DRY_COOLING_NORMALIZATIONS,
+        variable_names=variable_names,
+        variable_units=variable_units,
     )
-    normalized["air_temperature_k"] = normalize_temperature(
-        normalized["air_temperature_k"],
-        target_unit="K",
-        unit=resolve_unit(normalized["air_temperature_k"], variable_units=variable_units),
-    )
-    return normalized
 
 
 def classify_dry_cooling_engine_type(

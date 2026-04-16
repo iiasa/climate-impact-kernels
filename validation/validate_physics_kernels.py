@@ -274,7 +274,7 @@ def _build_wet_kernel_outputs(cases: list) -> xr.Dataset:
         },
         coords={"time": pd.date_range("2001-01-01", periods=1, freq="MS"), "lat": lats, "lon": lons},
     )
-    return evaluate_kernel(create_wet_cooling_kernel(), wet_map, climate, duration="monthly")
+    return evaluate_kernel(create_wet_cooling_kernel(), wet_map, climate, duration="native")
 
 
 def _build_dry_kernel_outputs(cases: list) -> xr.Dataset:
@@ -300,7 +300,7 @@ def _build_dry_kernel_outputs(cases: list) -> xr.Dataset:
         {"tas": (["time", "lat", "lon"], tas, {"units": "C"})},
         coords={"time": pd.date_range("2001-01-01", periods=1, freq="MS"), "lat": lats, "lon": lons},
     )
-    return evaluate_kernel(create_dry_cooling_kernel(), dry_map, climate, duration="monthly")
+    return evaluate_kernel(create_dry_cooling_kernel(), dry_map, climate, duration="native")
 
 
 # ── Comparison logic ─────────────────────────────────────────────────────────

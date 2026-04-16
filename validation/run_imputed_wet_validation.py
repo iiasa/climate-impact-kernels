@@ -104,7 +104,7 @@ def compute_added_outcomes(
         year_range=year_range,
     )
     wet_mapping = build_wet_cooling_mapping(added_mapping, cooling_mapping)
-    monthly = evaluate_kernel(create_wet_cooling_kernel(), wet_mapping, climate, duration="monthly")
+    monthly = evaluate_kernel(create_wet_cooling_kernel(), wet_mapping, climate, duration="native")
     annual = monthly["capacity_factor"].mean("time").values.astype(float)
     climate.close()
 

@@ -11,10 +11,9 @@ from climateresponse import (
     EvaluationResult,
     normalize_pressure,
     normalize_temperature,
-    resolve_unit,
 )
 from impacts.isimip import ISIMIPVariable
-from impacts.kernel import ImpactKernel
+from impacts.kernel import ImpactKernel, normalize_climate_inputs
 from impacts.thermoelectric._common import (
     join_country_from_cooling,
     validate_unique_units,
@@ -127,6 +126,13 @@ class WetCoolingAssumptions:
     max_temp_rise_c: float = 10.0
 
 
+WET_COOLING_NORMALIZATIONS = (
+    ("water_temperature", "C", normalize_temperature),
+    ("air_temperature", "C", normalize_temperature),
+    ("surface_pressure", "kPa", normalize_pressure),
+)
+
+
 def normalize_wet_cooling_climate_inputs(
     dataset: xr.Dataset,
     *,
@@ -135,34 +141,13 @@ def normalize_wet_cooling_climate_inputs(
 ) -> xr.Dataset:
     """Select, rename, and normalize the climate inputs required by wet-cooling physics."""
 
-    variables = dict(DEFAULT_ISIMIP_VARIABLE_NAMES)
-    if variable_names is not None:
-        variables.update(variable_names)
-
-    missing = [source_name for source_name in variables.values() if source_name not in dataset.data_vars]
-    if missing:
-        missing_list = ", ".join(sorted(missing))
-        raise ValueError(f"dataset missing required climate variables: {missing_list}")
-
-    normalized = dataset[list(variables.values())].rename(
-        {source_name: target_name for target_name, source_name in variables.items()}
+    return normalize_climate_inputs(
+        dataset,
+        default_variable_names=DEFAULT_ISIMIP_VARIABLE_NAMES,
+        normalizations=WET_COOLING_NORMALIZATIONS,
+        variable_names=variable_names,
+        variable_units=variable_units,
     )
-    normalized["water_temperature"] = normalize_temperature(
-        normalized["water_temperature"],
-        target_unit="C",
-        unit=resolve_unit(normalized["water_temperature"], variable_units=variable_units),
-    )
-    normalized["air_temperature"] = normalize_temperature(
-        normalized["air_temperature"],
-        target_unit="C",
-        unit=resolve_unit(normalized["air_temperature"], variable_units=variable_units),
-    )
-    normalized["surface_pressure"] = normalize_pressure(
-        normalized["surface_pressure"],
-        target_unit="kPa",
-        unit=resolve_unit(normalized["surface_pressure"], variable_units=variable_units),
-    )
-    return normalized
 
 
 def build_wet_cooling_mapping(

@@ -128,7 +128,7 @@ wheels = [
 
 [[package]]
 name = "impacts"
-version = "0.1.0"
+version = "0.1.2"
 source = { virtual = "." }
 dependencies = [
     { name = "cftime" },
@@ -137,6 +137,7 @@ dependencies = [
     { name = "netcdf4" },
     { name = "pandas" },
     { name = "pyarrow" },
+    { name = "pyyaml" },
     { name = "xarray" },
 ]
 
@@ -148,6 +149,7 @@ requires-dist = [
     { name = "netcdf4", specifier = ">=1.7.4" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pyarrow", specifier = ">=16.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "xarray", specifier = ">=2024.6.0" },
 ]
 

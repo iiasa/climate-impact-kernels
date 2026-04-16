@@ -3,6 +3,7 @@
 Current domains:
 
 - `impacts.thermoelectric`
+- `impacts.buildings`
 
 The package is a library of domain contracts and transformations, not a
 pipeline CLI.
@@ -24,6 +25,15 @@ The intended boundary is:
 If a reusable xarray manipulation step is missing for this workflow, add it to
 `climateresponse` first and then consume it here rather than reimplementing the
 helper inside `impacts`.
+
+## Buildings
+
+`impacts.buildings.chilled` evaluates the CHILLED pathway through the
+`ImpactKernel` contract. Climate input is daily near-surface air temperature
+on the archetype mapping. Solar irradiance is carried as a fixed EWEMBI
+monthly climatology attached to the mapping table rather than as a time-
+varying climate input. Output is emitted at the standard kernel durations
+(`native`, `daily`, `monthly`, `seasonal`).
 
 Current thermo-electric artifacts:
 

@@ -99,7 +99,7 @@ def compute_added_outcomes(
         year_range=year_range,
     )
     dry_mapping = build_dry_cooling_mapping(added_mapping, cooling_mapping)
-    monthly = evaluate_kernel(create_dry_cooling_kernel(), dry_mapping, climate, duration="monthly")
+    monthly = evaluate_kernel(create_dry_cooling_kernel(), dry_mapping, climate, duration="native")
     annual = monthly["capacity_factor"].mean("time").values.astype(float)
     climate.close()
 

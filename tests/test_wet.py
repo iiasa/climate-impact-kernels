@@ -147,7 +147,7 @@ class WetCoolingContractTest(unittest.TestCase):
 
     def test_compute_monthly_wet_cooling_impacts_matches_li_equations(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="monthly")
+        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native")
         params = WetCoolingAssumptions()
 
         self.assertEqual(monthly.sizes["entity"], 5)
@@ -229,7 +229,7 @@ class WetCoolingContractTest(unittest.TestCase):
 
         self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
         self.assertEqual(seasonal.coords["season"].values.tolist(), ["DJF", "MAM", "JJA", "SON"])
-        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="monthly")
+        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native")
         expected_djf = monthly["capacity_factor"].sel(time=["2001-01-01", "2001-02-01"], entity=101).mean().item()
         self.assertAlmostEqual(
             seasonal["capacity_factor"].sel(season="DJF", year=2001, entity=101).item(),
@@ -263,7 +263,7 @@ class WetCoolingDaskTest(WetCoolingContractTest):
 
     def test_compute_monthly_wet_cooling_impacts_matches_li_equations(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="monthly").compute()
+        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native").compute()
         params = WetCoolingAssumptions()
 
         self.assertEqual(monthly.sizes["entity"], 5)

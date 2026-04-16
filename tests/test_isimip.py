@@ -15,6 +15,7 @@ from impacts.isimip import (
     _file_overlaps_years,
     _standardize_time_index,
     discover_isimip_files,
+    load_isimip_gmt,
 )
 
 
@@ -130,6 +131,37 @@ class CalendarStandardizationTest(unittest.TestCase):
         b_fixed = _standardize_time_index(b)
         good_merge = xr.merge([a, b_fixed], join="inner")
         self.assertEqual(good_merge.sizes["time"], 3)
+
+
+class GMTLoadingTest(unittest.TestCase):
+    def test_load_isimip_gmt_stitches_historical_and_future(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            historical = pd.DataFrame(
+                {
+                    "date": ["1850-01-15", "1850-02-15", "1851-01-15", "1851-02-15"],
+                    "mean_anomaly": [0.1, 0.3, 0.5, 0.7],
+                }
+            )
+            future = pd.DataFrame(
+                {
+                    "date": ["2015-01-15", "2015-02-15", "2016-01-15", "2016-02-15"],
+                    "mean_anomaly": [1.0, 1.2, 1.4, 1.6],
+                }
+            )
+            historical.to_csv(
+                root / "gfdl-esm4_historical_monthly_temperature_1850_2014.csv",
+                index=False,
+            )
+            future.to_csv(
+                root / "gfdl-esm4_ssp126_monthly_temperature_2015_2100.csv",
+                index=False,
+            )
+
+            gmt = load_isimip_gmt(root, "GFDL-ESM4", "ssp126")
+
+            self.assertEqual(gmt["year"].values.tolist(), [1850, 1851, 2015, 2016])
+            self.assertEqual(gmt.values.tolist(), [0.2, 0.6, 1.1, 1.5])
 
 
 if __name__ == "__main__":
