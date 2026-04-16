@@ -15,16 +15,18 @@ import logging
 from pathlib import Path
 import sys
 
+import pandas as pd
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from impacts.rimex import (
-    build_quantile_map,
-    build_warming_level_assignments,
-    load_impact_table,
+from climateresponse import (
     attach_warming_levels,
+    build_warming_level_assignments,
+    build_warming_level_quantile_map,
 )
+from impacts.isimip import load_isimip_gmt
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,7 +82,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
 
-    monthly = load_impact_table(
+    monthly = pd.read_parquet(
         args.source_path,
         columns=[
             "cooling",
@@ -95,15 +97,25 @@ def main() -> None:
     if monthly["total_mw"].le(0).any():
         raise ValueError("total_mw must be strictly positive")
     monthly = monthly.assign(ucr=lambda data: data["usable_capacity_mw"] / data["total_mw"])
+
+    gmt_by_path = {
+        (row.gcm, row.scenario): load_isimip_gmt(
+            gmt_root=args.gmt_root, gcm=row.gcm, scenario=row.scenario
+        )
+        for row in monthly.loc[:, ["gcm", "scenario"]]
+        .drop_duplicates()
+        .sort_values(["gcm", "scenario"])
+        .itertuples(index=False)
+    }
     assignments = build_warming_level_assignments(
-        monthly,
-        gmt_root=args.gmt_root,
+        gmt_by_path,
+        path_columns=("gcm", "scenario"),
         min_warming_level=args.min_warming_level,
         max_warming_level=args.max_warming_level,
         bin_width=args.bin_width,
     )
     enriched = attach_warming_levels(monthly, assignments)
-    quantile_map = build_quantile_map(
+    quantile_map = build_warming_level_quantile_map(
         enriched,
         value_column="ucr",
         group_columns=("cooling", "country"),
