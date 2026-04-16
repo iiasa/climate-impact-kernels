@@ -22,8 +22,12 @@ from climateresponse.temporal import (
     aggregate_seasonal,
 )
 from climateresponse.warming_levels import (
+    WarmingLevelAssignments,
     assign_years_to_levels,
+    attach_warming_levels,
     bin_by_warming_level,
+    build_warming_level_assignments,
+    build_warming_level_quantile_map,
     match_warming_levels,
 )
 from climateresponse.units import normalize_pressure, normalize_temperature, resolve_unit
@@ -36,6 +40,7 @@ __all__ = [
     "GridQuantileResponseSurface",
     "RegionLevelValue",
     "RegionResponseSurface",
+    "WarmingLevelAssignments",
     "WarmingLevelMatch",
     "YearLevelBin",
     "aggregate_annual",
@@ -43,8 +48,11 @@ __all__ = [
     "aggregate_seasonal",
     "attach_gridded_dataarray",
     "attach_gridded_dataset",
+    "attach_warming_levels",
     "assign_years_to_levels",
     "bin_by_warming_level",
+    "build_warming_level_assignments",
+    "build_warming_level_quantile_map",
     "compute_anomaly",
     "compute_running_mean",
     "deterministic_resampling",

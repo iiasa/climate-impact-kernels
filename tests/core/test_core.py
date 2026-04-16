@@ -13,8 +13,11 @@ from climateresponse import (
     aggregate_seasonal,
     attach_gridded_dataarray,
     attach_gridded_dataset,
+    attach_warming_levels,
     assign_years_to_levels,
     bin_by_warming_level,
+    build_warming_level_assignments,
+    build_warming_level_quantile_map,
     compute_anomaly,
     compute_running_mean,
     deterministic_resampling,
@@ -431,6 +434,60 @@ class StatsTest(unittest.TestCase):
         samples = deterministic_resampling(values=[1.0, 2.0, 3.0, 4.0], n_samples=2)
 
         self.assertEqual(samples, (1.0, 3.0))
+
+
+class WarmingLevelLookupTest(unittest.TestCase):
+    def test_assignments_attach_and_quantile_map_round_trip(self) -> None:
+        gmt_by_path = {
+            ("GFDL-ESM4", "historical"): xr.DataArray(
+                [0.1, 0.6],
+                dims=["year"],
+                coords={"year": [1850, 1851]},
+            ),
+            ("GFDL-ESM4", "ssp126"): xr.DataArray(
+                [1.0, 1.0],
+                dims=["year"],
+                coords={"year": [2015, 2016]},
+            ),
+        }
+        frame = pd.DataFrame(
+            {
+                "impact_type": ["dry", "dry", "wet", "wet"],
+                "gcm": ["GFDL-ESM4"] * 4,
+                "scenario": ["historical", "historical", "ssp126", "ssp126"],
+                "time": ["1850-01-01", "1851-01-01", "2015-01-01", "2016-01-01"],
+                "region": ["A", "A", "A", "A"],
+                "value": [0.4, 0.6, 0.7, 0.9],
+            }
+        )
+
+        assignments = build_warming_level_assignments(
+            gmt_by_path,
+            path_columns=("gcm", "scenario"),
+            bin_width=0.5,
+        )
+        enriched = attach_warming_levels(frame, assignments)
+        quantile_map = build_warming_level_quantile_map(
+            enriched,
+            value_column="value",
+            group_columns=("impact_type", "region"),
+            quantiles=(0.5,),
+        )
+
+        self.assertEqual(assignments.target_levels, (0.0, 0.5, 1.0))
+        self.assertEqual(enriched["warming_level"].tolist(), [0.0, 0.5, 1.0, 1.0])
+        self.assertEqual(
+            quantile_map["sample_size"]
+            .sel(impact_type="wet", region="A", warming_level=1.0)
+            .item(),
+            2,
+        )
+        self.assertAlmostEqual(
+            quantile_map["value"]
+            .sel(impact_type="wet", region="A", warming_level=1.0, quantile=0.5)
+            .item(),
+            0.8,
+        )
 
 
 if __name__ == "__main__":
