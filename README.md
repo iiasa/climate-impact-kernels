@@ -35,6 +35,21 @@ monthly climatology attached to the mapping table rather than as a time-
 varying climate input. Output is emitted at the standard kernel durations
 (`native`, `daily`, `monthly`, `seasonal`).
 
+The buildings kernel now targets the ALPS2025 archetype contract only.
+`arch_input_reg.csv` is consumed with `building_type`, `urt`, `arch`, and
+`region` as first-class dimensions, including the explicit cross-combination
+rows (`sfh×urban`, `mfh×rural`) present in the source table. `impacts` treats
+those rows as upstream modeling assumptions, not as missing data to be repaired
+back into older urban/rural proxy rules.
+
+Upstream responsibilities remain outside the pure kernel boundary:
+
+- providing any parametric-run table path (`CHILLED_PARAMETRIC_PATH`) when a
+  scenario workflow wants to derive `ChilledEnergyAssumptions` from
+  `par_var.csv`
+- assembling scenario/run definitions
+- raster generation and spatial packaging beyond the validated archetype CSV
+
 Current thermo-electric artifacts:
 
 - `data/unit_cell_mapping.parquet`

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -9,6 +8,7 @@ import xarray as xr
 
 from impacts.buildings.chilled import (
     ChilledEnergyAssumptions,
+    DEFAULT_ARCHETYPE_INPUT_PATH,
     build_chilled_archetype_mapping,
     create_chilled_kernel,
     load_message_ix_buildings_archetypes,
@@ -77,8 +77,10 @@ class BuildingsChilledContractTest(unittest.TestCase):
         self.archetypes = pd.DataFrame(
             {
                 "name": ["AFR_sfh_s1", "CPA_sfh_s1"],
-                "urt": ["tot", "tot"],
-                "arch": ["sfh_s1", "sfh_s1"],
+                "building_type": ["sfh", "sfh"],
+                "urt": ["rur", "urb"],
+                "arch": ["s1", "s1"],
+                "region": ["AFR", "CPA"],
                 "permanent": [1, 1],
                 "area_env": [3.7, 3.6],
                 "gl_perc": [0.125, 0.125],
@@ -112,21 +114,45 @@ class BuildingsChilledContractTest(unittest.TestCase):
         self.assertAlmostEqual(mapping.loc[0, "solar_horizontal_m01"], 201.0)
         self.assertAlmostEqual(mapping.loc[1, "solar_horizontal_m12"], 242.0)
 
-    def test_loaders_accept_real_message_ix_buildings_schema(self) -> None:
-        archetype_path = Path(
-            "/home/raghunathan/message-ix-buildings/message_ix_buildings/data/chilled/version/ALPS2025/arch_input_reg.csv"
-        )
-        parametric_path = Path(
-            "/home/raghunathan/message-ix-buildings/message_ix_buildings/data/chilled/version/ALPS2025/par_var.csv"
-        )
+    def test_validate_archetype_table_rejects_pre_alps2025_proxy_labels(self) -> None:
+        legacy = self.archetypes.assign(building_type="residential", urt="tot")
+
+        with self.assertRaisesRegex(ValueError, "unsupported building_type values"):
+            build_chilled_archetype_mapping(self.spatial_units, legacy, self.solar)
+
+    @unittest.skipUnless(
+        DEFAULT_ARCHETYPE_INPUT_PATH.exists(),
+        "requires local message-ix-buildings archetype CSV",
+    )
+    def test_load_archetypes_accepts_real_message_ix_buildings_schema(self) -> None:
+        archetype_path = DEFAULT_ARCHETYPE_INPUT_PATH
 
         archetypes = load_message_ix_buildings_archetypes(archetype_path)
-        parametric_runs = load_message_ix_buildings_parametric_runs(parametric_path)
 
         self.assertIn("region", archetypes.columns)
         self.assertEqual(archetypes.loc[0, "region"], "AFR")
-        self.assertIn("name_run", parametric_runs.columns)
-        assumptions = ChilledEnergyAssumptions.from_parametric_row(parametric_runs.iloc[0])
+        self.assertEqual(sorted(archetypes["building_type"].unique().tolist()), ["mfh", "sfh"])
+        self.assertEqual(sorted(archetypes["urt"].unique().tolist()), ["rur", "urb"])
+        self.assertEqual(sorted(archetypes["arch"].unique().tolist()), ["s1", "s2", "s3", "s51", "s52"])
+
+    def test_parametric_runs_require_explicit_upstream_path(self) -> None:
+        with self.assertRaisesRegex(FileNotFoundError, "ALPS2025-only CHILLED support does not infer"):
+            load_message_ix_buildings_parametric_runs(None)
+
+    def test_assumptions_load_from_parametric_row(self) -> None:
+        assumptions = ChilledEnergyAssumptions.from_parametric_row(
+            {
+                "t_sp_c": 23.0,
+                "t_sp_c_max": 26.0,
+                "t_sp_h": 20.0,
+                "f_c": 0.45,
+                "f_f": 0.25,
+                "f_h": 0.9,
+                "cop": 3.2,
+                "eff": 0.9,
+            }
+        )
+
         self.assertEqual(assumptions.cooling_setpoint_c, 23.0)
         self.assertEqual(assumptions.fan_power_w, 55.0)
 

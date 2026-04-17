@@ -62,6 +62,9 @@ REQUIRED_PARAMETRIC_COLUMNS = frozenset(
         "f_h",
     }
 )
+ALPS2025_BUILDING_TYPES = frozenset({"sfh", "mfh"})
+ALPS2025_URT_VALUES = frozenset({"rur", "urb"})
+ALPS2025_ARCH_VALUES = frozenset({"s1", "s2", "s3", "s51", "s52"})
 ARCHETYPE_PARAMETER_COLUMNS = (
     "area_env",
     "gl_perc",
@@ -101,11 +104,8 @@ DEFAULT_ARCHETYPE_INPUT_PATH = Path(
     )
 )
 DEFAULT_PARAMETRIC_INPUT_PATH = Path(
-    os.environ.get(
-        "CHILLED_PARAMETRIC_PATH",
-        str(Path.home() / "message-ix-buildings/message_ix_buildings/data/chilled/version/ALPS2025/par_var.csv"),
-    )
-)
+    os.environ.get("CHILLED_PARAMETRIC_PATH", "")
+) if os.environ.get("CHILLED_PARAMETRIC_PATH") else None
 DEFAULT_R12_YAML_PATH = Path(
     os.environ.get(
         "MESSAGE_R12_YAML_PATH",
@@ -194,6 +194,12 @@ def load_message_ix_buildings_archetypes(path: Path | str = DEFAULT_ARCHETYPE_IN
 def load_message_ix_buildings_parametric_runs(path: Path | str = DEFAULT_PARAMETRIC_INPUT_PATH) -> pd.DataFrame:
     """Load and validate the CHILLED parametric-run table."""
 
+    if path is None:
+        raise FileNotFoundError(
+            "ALPS2025-only CHILLED support does not infer a parametric-run table; "
+            "pass CHILLED_PARAMETRIC_PATH explicitly when upstream orchestration provides one"
+        )
+
     frame = pd.read_csv(path)
     missing = REQUIRED_PARAMETRIC_COLUMNS.difference(frame.columns)
     if missing:
@@ -203,12 +209,46 @@ def load_message_ix_buildings_parametric_runs(path: Path | str = DEFAULT_PARAMET
 
 
 def validate_archetype_table(frame: pd.DataFrame) -> pd.DataFrame:
-    """Validate the archetype table schema."""
+    """Validate the ALPS2025 archetype table contract."""
 
     missing = REQUIRED_ARCHETYPE_COLUMNS.difference(frame.columns)
     if missing:
         raise ValueError(f"archetype table missing required columns: {', '.join(sorted(missing))}")
-    return frame
+
+    validated = frame.copy()
+
+    invalid_building_types = set(validated["building_type"].dropna()) - ALPS2025_BUILDING_TYPES
+    if invalid_building_types:
+        raise ValueError(
+            "archetype table has unsupported building_type values: "
+            f"{', '.join(sorted(map(str, invalid_building_types)))}"
+        )
+
+    invalid_urt = set(validated["urt"].dropna()) - ALPS2025_URT_VALUES
+    if invalid_urt:
+        raise ValueError(
+            f"archetype table has unsupported urt values: {', '.join(sorted(map(str, invalid_urt)))}"
+        )
+
+    invalid_arch = set(validated["arch"].dropna()) - ALPS2025_ARCH_VALUES
+    if invalid_arch:
+        raise ValueError(
+            f"archetype table has unsupported arch values: {', '.join(sorted(map(str, invalid_arch)))}"
+        )
+
+    duplicate_mask = validated.duplicated(["region", "building_type", "urt", "arch"], keep=False)
+    if duplicate_mask.any():
+        duplicates = (
+            validated.loc[duplicate_mask, ["region", "building_type", "urt", "arch"]]
+            .drop_duplicates()
+            .sort_values(["region", "building_type", "urt", "arch"])
+        )
+        raise ValueError(
+            "archetype table must be unique on (region, building_type, urt, arch); duplicates found for "
+            f"{duplicates.to_dict(orient='records')}"
+        )
+
+    return validated
 
 
 def normalize_chilled_solar_climatology(
@@ -314,10 +354,11 @@ def build_chilled_parameter_grids(
     urt: str,
     vintage: str,
 ) -> xr.Dataset:
-    """Build gridded archetype parameters for one (building_type, urt, vintage) combination.
+    """Build gridded archetype parameters for one ALPS2025 source-table combination.
 
     Maps region_raster values to archetype parameter values for the selected
-    row, and flattens monthly solar into 24 per-cell columns matching the
+    building_type × urt × arch rows exactly as provided by the ALPS2025 table,
+    and flattens monthly solar into 24 per-cell columns matching the
     kernel's _monthly_static_array contract.
     """
 
@@ -379,14 +420,19 @@ def build_chilled_archetype_mapping(
     archetypes: pd.DataFrame,
     solar_climatology: xr.Dataset,
 ) -> pd.DataFrame:
-    """Explode spatial units to region-matched archetypes and attach fixed solar climatology."""
+    """Explode spatial units to region-matched ALPS2025 archetypes and attach solar climatology.
+
+    The ALPS2025 source table already includes the sfh×urban and mfh×rural
+    combinations. Those rows are consumed as upstream modeling assumptions,
+    not repaired into older urban/rural proxy semantics inside impacts.
+    """
 
     missing_units = REQUIRED_SPATIAL_UNIT_COLUMNS.difference(spatial_units.columns)
     if missing_units:
         missing_list = ", ".join(sorted(missing_units))
         raise ValueError(f"spatial_units missing required columns: {missing_list}")
 
-    archetype_table = archetypes.copy() if "region" in archetypes.columns else validate_archetype_table(archetypes)
+    archetype_table = validate_archetype_table(archetypes.copy())
     solar = normalize_chilled_solar_climatology(solar_climatology)
 
     base = spatial_units.reset_index(drop=True).copy()
@@ -547,3 +593,4 @@ def _monthly_static_array(attached: xr.Dataset, *, prefix: str) -> xr.DataArray:
 
 def _entity_coord(attached: xr.Dataset, name: str) -> xr.DataArray:
     return xr.DataArray(attached.coords[name].data, dims=("entity",), coords={"entity": attached.coords["entity"]})
+
