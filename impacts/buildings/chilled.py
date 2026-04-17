@@ -81,6 +81,7 @@ ARCHETYPE_PARAMETER_COLUMNS = (
 )
 MONTHS = tuple(range(1, 13))
 _KERNEL_ENTITY_CHUNK = 10000
+_KERNEL_TIME_CHUNK = 365
 SOLAR_VERTICAL_COLUMNS = tuple(f"solar_vertical_m{month:02d}" for month in MONTHS)
 SOLAR_HORIZONTAL_COLUMNS = tuple(f"solar_horizontal_m{month:02d}" for month in MONTHS)
 SOLAR_COLUMNS = SOLAR_VERTICAL_COLUMNS + SOLAR_HORIZONTAL_COLUMNS
@@ -515,6 +516,17 @@ def _evaluate_chilled_kernel(
     if "time" not in attached.sizes:
         raise ValueError("attached climate inputs must include a time dimension")
 
+    # Rechunk on (time, entity) at entry so the downstream month→time isel
+    # and xr.where broadcasts produce an O(time/TIME_CHUNK * entity/ENTITY_CHUNK)
+    # graph instead of an O(time * entity/ENTITY_CHUNK) one. Without this the
+    # raw ISIMIP loader ships (time=1, entity=full) chunks, and intersecting
+    # those with the monthly parameter arrays scales the dask graph to
+    # millions of tasks at the 85-year × global-0.5° horizon — scheduler
+    # overhead drives OOM before any single chunk gets large.
+    entity_chunk = min(_KERNEL_ENTITY_CHUNK, attached.sizes["entity"])
+    time_chunk = min(_KERNEL_TIME_CHUNK, attached.sizes["time"])
+    attached = attached.chunk({"time": time_chunk, "entity": entity_chunk})
+
     time_index = attached.indexes["time"]
     month_index = np.asarray(time_index.month - 1, dtype=np.int32)
 
@@ -544,13 +556,21 @@ def _evaluate_chilled_kernel(
     t_max_c = assumptions.cooling_max_c - ((gn_int + gn_sol) / (h_tr + h_v_op))
 
     # Chunk on entity before the month→time broadcast so the (time, entity)
-    # result stays dask-backed instead of eager-materializing as a single
-    # float64 array (~4.5 GB at 6-year × global-0.5° scale).
+    # result stays dask-backed, then rechunk on time: the isel propagates
+    # the month dim's chunk width (12) onto the new time dim, which
+    # mis-aligns with air_temperature's TIME_CHUNK and forces an
+    # intersection rechunk during xr.where that inflates task count by
+    # ~30× per output variable.
     month_indexer = xr.DataArray(month_index, dims=("time",))
-    entity_chunk = min(_KERNEL_ENTITY_CHUNK, t_bal_h.sizes["entity"])
-    t_bal_h_daily = t_bal_h.chunk({"entity": entity_chunk}).isel(month=month_indexer)
-    t_bal_c_daily = t_bal_c.chunk({"entity": entity_chunk}).isel(month=month_indexer)
-    t_max_c_daily = t_max_c.chunk({"entity": entity_chunk}).isel(month=month_indexer)
+    t_bal_h_daily = (
+        t_bal_h.chunk({"entity": entity_chunk}).isel(month=month_indexer).chunk({"time": time_chunk})
+    )
+    t_bal_c_daily = (
+        t_bal_c.chunk({"entity": entity_chunk}).isel(month=month_indexer).chunk({"time": time_chunk})
+    )
+    t_max_c_daily = (
+        t_max_c.chunk({"entity": entity_chunk}).isel(month=month_indexer).chunk({"time": time_chunk})
+    )
 
     vdd_h = xr.where(t_bal_h_daily >= air_temperature, t_bal_h_daily - air_temperature, 0.0)
     vdd_tmax_c = xr.where(air_temperature >= t_max_c_daily, air_temperature - t_max_c_daily, 0.0)
