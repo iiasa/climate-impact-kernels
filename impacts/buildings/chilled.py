@@ -80,6 +80,7 @@ ARCHETYPE_PARAMETER_COLUMNS = (
     "u_roof",
 )
 MONTHS = tuple(range(1, 13))
+_KERNEL_ENTITY_CHUNK = 10000
 SOLAR_VERTICAL_COLUMNS = tuple(f"solar_vertical_m{month:02d}" for month in MONTHS)
 SOLAR_HORIZONTAL_COLUMNS = tuple(f"solar_horizontal_m{month:02d}" for month in MONTHS)
 SOLAR_COLUMNS = SOLAR_VERTICAL_COLUMNS + SOLAR_HORIZONTAL_COLUMNS
@@ -542,9 +543,14 @@ def _evaluate_chilled_kernel(
     t_bal_c = assumptions.cooling_setpoint_c - ((gn_int + gn_sol) / (h_tr + h_v_cl))
     t_max_c = assumptions.cooling_max_c - ((gn_int + gn_sol) / (h_tr + h_v_op))
 
-    t_bal_h_daily = t_bal_h.isel(month=xr.DataArray(month_index, dims=("time",)))
-    t_bal_c_daily = t_bal_c.isel(month=xr.DataArray(month_index, dims=("time",)))
-    t_max_c_daily = t_max_c.isel(month=xr.DataArray(month_index, dims=("time",)))
+    # Chunk on entity before the month→time broadcast so the (time, entity)
+    # result stays dask-backed instead of eager-materializing as a single
+    # float64 array (~4.5 GB at 6-year × global-0.5° scale).
+    month_indexer = xr.DataArray(month_index, dims=("time",))
+    entity_chunk = min(_KERNEL_ENTITY_CHUNK, t_bal_h.sizes["entity"])
+    t_bal_h_daily = t_bal_h.chunk({"entity": entity_chunk}).isel(month=month_indexer)
+    t_bal_c_daily = t_bal_c.chunk({"entity": entity_chunk}).isel(month=month_indexer)
+    t_max_c_daily = t_max_c.chunk({"entity": entity_chunk}).isel(month=month_indexer)
 
     vdd_h = xr.where(t_bal_h_daily >= air_temperature, t_bal_h_daily - air_temperature, 0.0)
     vdd_tmax_c = xr.where(air_temperature >= t_max_c_daily, air_temperature - t_max_c_daily, 0.0)
