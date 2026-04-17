@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Literal, Sequence
 
 import numpy as np
 import pandas as pd
@@ -105,14 +105,21 @@ def load_isimip_variable(
     *,
     year_range: tuple[int, int] | None = None,
     chunks: dict | None = None,
+    target_frequency: Literal["native", "monthly"] = "monthly",
 ) -> xr.DataArray:
-    """Load a single ISIMIP variable, resampling daily sources to monthly."""
+    """Load a single ISIMIP variable at the requested frequency.
+
+    ``target_frequency="monthly"`` (default) resamples daily sources to monthly
+    via ``aggregate_monthly`` and preserves the prior contract. ``"native"``
+    returns the variable at its on-disk frequency, which daily CHILLED and
+    similar pipelines need.
+    """
 
     files = discover_isimip_files(variable, gcm, scenario, paths, year_range=year_range)
     ds = xr.open_mfdataset(files, combine="by_coords", chunks=chunks)
     da = ds[variable.name]
 
-    if variable.frequency == "daily":
+    if target_frequency == "monthly" and variable.frequency == "daily":
         da = aggregate_monthly(da)
 
     if year_range is not None:
@@ -129,12 +136,15 @@ def load_isimip_dataset(
     *,
     year_range: tuple[int, int] | None = None,
     chunks: dict | None = None,
+    target_frequency: Literal["native", "monthly"] = "monthly",
 ) -> xr.Dataset:
-    """Load multiple ISIMIP variables into a merged monthly Dataset.
+    """Load multiple ISIMIP variables into a merged Dataset at the target frequency.
 
     Each variable is loaded independently (possibly from different products),
-    resampled to monthly if daily, calendar-standardized, and then merged
-    on shared (time, lat, lon) coordinates.
+    resampled if ``target_frequency="monthly"`` and the source is daily,
+    calendar-standardized, and merged on shared coordinates. With
+    ``target_frequency="native"`` the merge requires the variables to share a
+    frequency on disk.
     """
 
     arrays = {}
@@ -146,6 +156,7 @@ def load_isimip_dataset(
             paths,
             year_range=year_range,
             chunks=chunks,
+            target_frequency=target_frequency,
         )
         da = _standardize_time_index(da)
         key = variable.output_name or variable.name
