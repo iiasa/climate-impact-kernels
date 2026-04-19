@@ -24,6 +24,8 @@ array-native kernels without rebuilding the same xarray plumbing.
 
 - inputs and outputs stay xarray-native
 - dask-backed execution remains viable
+- downstream temporal aggregation keeps named xarray axes, and the standard
+  seasonal path consolidates `season`/`year` chunks for dask-backed outputs
 - kernel functions operate on already-normalized, already-attached data
 - evaluation is generic orchestration, not domain physics
 

@@ -7,6 +7,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+try:
+    import dask.array as da  # noqa: F401
+except ImportError:
+    da = None
+
 from climateresponse import (
     aggregate_annual,
     aggregate_monthly,
@@ -209,6 +214,83 @@ class TemporalTest(unittest.TestCase):
         )
 
         self.assertEqual(seasonal.sel(season="DJF", year=2001).item(), 3.0)
+
+    def test_aggregate_seasonal_preserves_standard_subset_order(self) -> None:
+        seasonal = aggregate_seasonal(
+            xr.DataArray(
+                [12.0, 1.0, 2.0, 6.0, 7.0, 8.0],
+                dims=["time"],
+                coords={
+                    "time": np.array(
+                        [
+                            "2000-12-01",
+                            "2001-01-01",
+                            "2001-02-01",
+                            "2001-06-01",
+                            "2001-07-01",
+                            "2001-08-01",
+                        ],
+                        dtype="datetime64[ns]",
+                    )
+                },
+            ),
+            seasons={"JJA": (6, 7, 8), "DJF": (12, 1, 2)},
+        )
+
+        self.assertEqual(seasonal.coords["season"].values.tolist(), ["JJA", "DJF"])
+        self.assertEqual(seasonal.sel(season="JJA", year=2001).item(), 7.0)
+        self.assertEqual(seasonal.sel(season="DJF", year=2001).item(), 5.0)
+
+    def test_aggregate_seasonal_preserves_360_day_calendar(self) -> None:
+        seasonal = aggregate_seasonal(
+            xr.DataArray(
+                [6.0, 3.0, 0.0],
+                dims=["time"],
+                coords={
+                    "time": [
+                        cftime.Datetime360Day(2000, 12, 1),
+                        cftime.Datetime360Day(2001, 1, 1),
+                        cftime.Datetime360Day(2001, 2, 1),
+                    ]
+                },
+            )
+        )
+
+        self.assertEqual(seasonal.sel(season="DJF", year=2001).item(), 3.0)
+
+    def test_aggregate_seasonal_supports_nonstandard_seasons(self) -> None:
+        seasonal = aggregate_seasonal(
+            xr.DataArray(
+                [4.0, 5.0, 6.0],
+                dims=["time"],
+                coords={
+                    "time": np.array(
+                        ["2001-04-01", "2001-05-01", "2001-06-01"],
+                        dtype="datetime64[ns]",
+                    )
+                },
+            ),
+            seasons={"AMJ": (4, 5, 6)},
+        )
+
+        self.assertEqual(seasonal.coords["season"].values.tolist(), ["AMJ"])
+        self.assertEqual(seasonal.sel(season="AMJ", year=2001).item(), 5.0)
+
+    @unittest.skipIf(da is None, "dask is not installed")
+    def test_aggregate_seasonal_consolidates_standard_dask_chunks(self) -> None:
+        time = pd.date_range("2000-01-01", "2001-12-31", freq="D")
+        data = xr.DataArray(
+            np.arange(len(time) * 4, dtype=float).reshape(len(time), 4),
+            dims=["time", "entity"],
+            coords={"time": time, "entity": [101, 202, 303, 404]},
+        ).chunk({"time": 90, "entity": 2})
+
+        seasonal = aggregate_seasonal(data)
+
+        self.assertEqual(seasonal.dims, ("season", "year", "entity"))
+        self.assertEqual(seasonal.chunks[0], (4,))
+        self.assertEqual(seasonal.chunks[1], (3,))
+        self.assertEqual(seasonal.chunks[2], (2, 2))
 
 
 class SpatialTest(unittest.TestCase):
