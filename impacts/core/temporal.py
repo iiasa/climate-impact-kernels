@@ -15,7 +15,20 @@ CLIMATOLOGICAL_SEASONS: dict[str, tuple[int, ...]] = {
     "JJA": (6, 7, 8),
     "SON": (9, 10, 11),
 }
-_SEASON_START_MONTHS: dict[int, str] = {12: "DJF", 3: "MAM", 6: "JJA", 9: "SON"}
+_MONTH_CODES: dict[int, str] = {
+    1: "JAN",
+    2: "FEB",
+    3: "MAR",
+    4: "APR",
+    5: "MAY",
+    6: "JUN",
+    7: "JUL",
+    8: "AUG",
+    9: "SEP",
+    10: "OCT",
+    11: "NOV",
+    12: "DEC",
+}
 
 
 def aggregate_monthly(
@@ -44,42 +57,22 @@ def aggregate_seasonal(
     seasons: Mapping[str, Sequence[int]] | None = None,
     time_dim: str = "time",
 ) -> ArrayLike:
-    """Aggregate monthly data into season-by-year means.
+    """Aggregate time-indexed data into season-by-year means.
 
-    Standard climatological seasons use a quarterly resample path that keeps
-    dask-backed execution streamable and consolidates the output season/year
-    chunks. Non-standard season definitions fall back to the legacy
-    implementation to preserve the broader API surface.
+    `seasons=` accepts quarterly tilings of the calendar year and subsets of
+    those tilings. Each season must be exactly three contiguous months, and all
+    selected seasons must share the same quarterly phase.
     """
 
     _validate_time_dim(data=data, time_dim=time_dim)
     season_definitions = dict(seasons) if seasons is not None else dict(CLIMATOLOGICAL_SEASONS)
     if not season_definitions:
         raise ValueError("no season definitions selected any months")
-
-    season_names = list(season_definitions)
-    if _uses_climatological_quarters(season_definitions):
-        return _aggregate_climatological_seasons(
-            data=data,
-            season_names=season_names,
-            time_dim=time_dim,
-        )
-
-    seasonal_arrays = [
-        _aggregate_single_season(
-            data=data,
-            season=season,
-            months=months,
-            time_dim=time_dim,
-        )
-        for season, months in season_definitions.items()
-    ]
-    available = [array for array in seasonal_arrays if array is not None]
-    if not available:
-        raise ValueError("no season definitions selected any months")
-
-    combined = xr.concat(available, dim="season", join="outer")
-    return combined.reindex(season=season_names)
+    return _aggregate_quarterly_seasons(
+        data=data,
+        season_definitions=season_definitions,
+        time_dim=time_dim,
+    )
 
 
 def _validate_time_dim(data: ArrayLike, time_dim: str) -> None:
@@ -87,62 +80,108 @@ def _validate_time_dim(data: ArrayLike, time_dim: str) -> None:
         raise ValueError(f"{time_dim!r} is not a dimension of the input data")
 
 
-def _aggregate_single_season(
+def _aggregate_quarterly_seasons(
     data: ArrayLike,
-    season: str,
-    months: Sequence[int],
-    time_dim: str,
-) -> ArrayLike | None:
-    month = data[time_dim].dt.month
-    selected = data.where(month.isin(months), drop=True)
-    if selected.sizes.get(time_dim, 0) == 0:
-        return None
-
-    year = selected[time_dim].dt.year
-    if 12 in months and any(month_ < 12 for month_ in months):
-        year = year + xr.where(selected[time_dim].dt.month == 12, 1, 0)
-
-    return selected.groupby(year.rename("year")).mean(dim=time_dim).expand_dims(season=[season])
-
-
-def _uses_climatological_quarters(seasons: Mapping[str, Sequence[int]]) -> bool:
-    return all(tuple(months) == CLIMATOLOGICAL_SEASONS.get(season) for season, months in seasons.items())
-
-
-def _aggregate_climatological_seasons(
-    data: ArrayLike,
-    season_names: Sequence[str],
+    season_definitions: Mapping[str, Sequence[int]],
     time_dim: str,
 ) -> ArrayLike:
-    resampled = data.resample({time_dim: "QS-DEC"}).mean()
+    season_names = list(season_definitions)
+    season_start_months = _validate_quarterly_seasons(season_definitions)
+    anchor_month = next(iter(season_start_months))
+    resampled = data.resample({time_dim: _quarterly_frequency(anchor_month)}).mean()
     if resampled.sizes.get(time_dim, 0) == 0:
         raise ValueError("no season definitions selected any months")
 
     month_values = np.asarray(resampled[time_dim].dt.month.values, dtype=int)
-    season_labels = np.asarray([_SEASON_START_MONTHS.get(month) for month in month_values], dtype=object)
-    keep = np.isin(season_labels, season_names)
-    if not bool(keep.any()):
+    keep = np.isin(month_values, tuple(season_start_months))
+    if not bool(np.any(keep)):
         raise ValueError("no season definitions selected any months")
 
     filtered = resampled.isel({time_dim: keep})
     filtered_months = month_values[keep]
     filtered_years = np.asarray(filtered[time_dim].dt.year.values, dtype=int)
+    year_offsets = np.asarray(
+        [_season_year_offset(start_month) for start_month in filtered_months],
+        dtype=int,
+    )
 
     seasonal = filtered.assign_coords(
-        season=(time_dim, season_labels[keep].tolist()),
-        year=(time_dim, (filtered_years + (filtered_months == 12).astype(int)).tolist()),
+        season=(time_dim, [season_start_months[start_month] for start_month in filtered_months]),
+        year=(time_dim, filtered_years + year_offsets),
     )
     seasonal = seasonal.drop_vars(time_dim, errors="ignore")
     seasonal = seasonal.set_index({time_dim: ("season", "year")}).unstack(time_dim)
-    seasonal = seasonal.transpose("season", "year", *[dim for dim in data.dims if dim != time_dim])
-    seasonal = seasonal.reindex(season=list(season_names))
+    seasonal = seasonal.transpose(
+        "season",
+        "year",
+        *[dim for dim in data.dims if dim != time_dim],
+        missing_dims="ignore",
+    )
+    seasonal = seasonal.reindex(season=season_names)
     return _consolidate_seasonal_chunks(seasonal)
 
 
+def _validate_quarterly_seasons(seasons: Mapping[str, Sequence[int]]) -> dict[int, str]:
+    season_start_months: dict[int, str] = {}
+    quarterly_phase: int | None = None
+
+    for season, months in seasons.items():
+        normalized_months = _normalize_months(season=season, months=months)
+        start_month = normalized_months[0]
+        expected_months = _quarter_months(start_month)
+        if normalized_months != expected_months:
+            raise ValueError(
+                f"{season!r} must be a contiguous three-month season in calendar order; "
+                f"got {normalized_months!r}"
+            )
+
+        phase = start_month % 3
+        if quarterly_phase is None:
+            quarterly_phase = phase
+        elif phase != quarterly_phase:
+            raise ValueError("season definitions must share a quarterly phase")
+
+        if start_month in season_start_months:
+            raise ValueError(f"duplicate quarterly start month {start_month} in season definitions")
+
+        season_start_months[start_month] = season
+
+    return season_start_months
+
+
+def _normalize_months(season: str, months: Sequence[int]) -> tuple[int, int, int]:
+    normalized_months = tuple(int(month) for month in months)
+    if len(normalized_months) != 3 or any(month < 1 or month > 12 for month in normalized_months):
+        raise ValueError(f"{season!r} must define exactly three calendar months")
+    return normalized_months
+
+
+def _quarter_months(start_month: int) -> tuple[int, int, int]:
+    return tuple(((start_month + offset - 1) % 12) + 1 for offset in range(3))
+
+
+def _quarterly_frequency(start_month: int) -> str:
+    return f"QS-{_MONTH_CODES[start_month]}"
+
+
+def _season_year_offset(start_month: int) -> int:
+    return int(_quarter_months(start_month)[-1] < start_month)
+
+
 def _consolidate_seasonal_chunks(data: ArrayLike) -> ArrayLike:
-    if data.chunks is None:
+    if not _is_dask_backed(data):
         return data
     return data.chunk({dim: -1 for dim in ("season", "year") if dim in data.dims})
+
+
+def _is_dask_backed(data: ArrayLike) -> bool:
+    if isinstance(data, xr.DataArray):
+        return _is_dask_array(data.data)
+    return any(_is_dask_array(variable.data) for variable in data.data_vars.values())
+
+
+def _is_dask_array(values: object) -> bool:
+    return hasattr(values, "__dask_graph__") and hasattr(values, "chunks")
 
 
 def _month_start_labels(data: ArrayLike, time_dim: str) -> xr.DataArray:

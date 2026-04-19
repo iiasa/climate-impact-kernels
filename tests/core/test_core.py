@@ -241,6 +241,43 @@ class TemporalTest(unittest.TestCase):
         self.assertEqual(seasonal.sel(season="JJA", year=2001).item(), 7.0)
         self.assertEqual(seasonal.sel(season="DJF", year=2001).item(), 5.0)
 
+    def test_aggregate_seasonal_supports_phase_shifted_quarters(self) -> None:
+        seasonal = aggregate_seasonal(
+            xr.DataArray(
+                np.arange(1.0, 13.0),
+                dims=["time"],
+                coords={
+                    "time": np.array(
+                        [
+                            "2001-01-01",
+                            "2001-02-01",
+                            "2001-03-01",
+                            "2001-04-01",
+                            "2001-05-01",
+                            "2001-06-01",
+                            "2001-07-01",
+                            "2001-08-01",
+                            "2001-09-01",
+                            "2001-10-01",
+                            "2001-11-01",
+                            "2001-12-01",
+                        ],
+                        dtype="datetime64[ns]",
+                    )
+                },
+            ),
+            seasons={
+                "JFM": (1, 2, 3),
+                "AMJ": (4, 5, 6),
+                "JAS": (7, 8, 9),
+                "OND": (10, 11, 12),
+            },
+        )
+
+        self.assertEqual(seasonal.coords["season"].values.tolist(), ["JFM", "AMJ", "JAS", "OND"])
+        self.assertEqual(seasonal.sel(season="JFM", year=2001).item(), 2.0)
+        self.assertEqual(seasonal.sel(season="OND", year=2001).item(), 11.0)
+
     def test_aggregate_seasonal_preserves_360_day_calendar(self) -> None:
         seasonal = aggregate_seasonal(
             xr.DataArray(
@@ -258,23 +295,54 @@ class TemporalTest(unittest.TestCase):
 
         self.assertEqual(seasonal.sel(season="DJF", year=2001).item(), 3.0)
 
-    def test_aggregate_seasonal_supports_nonstandard_seasons(self) -> None:
-        seasonal = aggregate_seasonal(
-            xr.DataArray(
-                [4.0, 5.0, 6.0],
-                dims=["time"],
-                coords={
-                    "time": np.array(
-                        ["2001-04-01", "2001-05-01", "2001-06-01"],
-                        dtype="datetime64[ns]",
-                    )
-                },
-            ),
-            seasons={"AMJ": (4, 5, 6)},
+    def test_aggregate_seasonal_rejects_unsupported_seasons(self) -> None:
+        data = xr.DataArray(
+            [4.0, 5.0, 6.0],
+            dims=["time"],
+            coords={
+                "time": np.array(
+                    ["2001-04-01", "2001-05-01", "2001-06-01"],
+                    dtype="datetime64[ns]",
+                )
+            },
         )
 
-        self.assertEqual(seasonal.coords["season"].values.tolist(), ["AMJ"])
-        self.assertEqual(seasonal.sel(season="AMJ", year=2001).item(), 5.0)
+        with self.assertRaisesRegex(ValueError, "quarterly phase"):
+            aggregate_seasonal(
+                data,
+                seasons={
+                    "DJF": (12, 1, 2),
+                    "JFM": (1, 2, 3),
+                },
+            )
+
+    def test_aggregate_seasonal_supports_datasets_with_heterogeneous_dims(self) -> None:
+        seasonal = aggregate_seasonal(
+            xr.Dataset(
+                data_vars={
+                    "capacity_factor": (
+                        ("time", "entity"),
+                        [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+                    ),
+                    "mean_temperature": (
+                        ("time",),
+                        [10.0, 12.0, 14.0],
+                    ),
+                },
+                coords={
+                    "time": np.array(
+                        ["2001-01-01", "2001-02-01", "2001-03-01"],
+                        dtype="datetime64[ns]",
+                    ),
+                    "entity": [101, 202],
+                },
+            ),
+            seasons={"JFM": (1, 2, 3)},
+        )
+
+        self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
+        self.assertEqual(seasonal["mean_temperature"].dims, ("season", "year"))
+        self.assertEqual(seasonal["mean_temperature"].sel(season="JFM", year=2001).item(), 12.0)
 
     @unittest.skipIf(da is None, "dask is not installed")
     def test_aggregate_seasonal_consolidates_standard_dask_chunks(self) -> None:
@@ -288,9 +356,22 @@ class TemporalTest(unittest.TestCase):
         seasonal = aggregate_seasonal(data)
 
         self.assertEqual(seasonal.dims, ("season", "year", "entity"))
+        self.assertIsInstance(seasonal.data, da.Array)
         self.assertEqual(seasonal.chunks[0], (4,))
         self.assertEqual(seasonal.chunks[1], (3,))
         self.assertEqual(seasonal.chunks[2], (2, 2))
+
+    @unittest.skipIf(da is None, "dask is not installed")
+    def test_aggregate_seasonal_keeps_datasets_lazy(self) -> None:
+        seasonal = aggregate_seasonal(
+            xr.DataArray(
+                np.arange(12.0),
+                dims=["time"],
+                coords={"time": pd.date_range("2001-01-01", periods=12, freq="MS")},
+            ).chunk({"time": 3}).to_dataset(name="tas")
+        )
+
+        self.assertTrue(hasattr(seasonal["tas"].data, "__dask_graph__"))
 
 
 class SpatialTest(unittest.TestCase):

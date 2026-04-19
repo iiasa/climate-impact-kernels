@@ -100,9 +100,10 @@ In this repository those reusable mechanics are implemented as xarray-native ker
 - running means use xarray rolling windows
 - warming-level tables and bins are derived from xarray GMT series
 - seasonal and annual aggregation operate on time coordinates
-- standard climatological seasonal aggregation uses quarterly resampling and
-  consolidated `season`/`year` chunks so dask-backed outputs do not fragment
-  into one-chunk-per-season-year layouts
+- seasonal aggregation uses quarterly resampling for quarterly tilings and
+  their subsets, rejects unsupported non-quarterly definitions at the API
+  boundary, and consolidates `season`/`year` chunks so dask-backed outputs do
+  not fragment into one-chunk-per-season-year layouts
 - spatial weighting works on masked arrays over explicit dimensions
 - warming-level interpolation stays on named warming-level axes
 
