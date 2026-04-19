@@ -22,6 +22,8 @@ Important assumptions:
   table
 - output duration is part of kernel evaluation: `native`, `daily`, `monthly`,
   or `seasonal`
+- `seasonal` outputs can remain dask-backed until the caller materializes or
+  writes them
 
 ## Main Entry Points
 

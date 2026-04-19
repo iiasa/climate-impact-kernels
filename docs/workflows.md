@@ -26,6 +26,9 @@ The CHILLED workflow is:
 5. Evaluate the kernel at `native`, `daily`, `monthly`, or `seasonal`
    duration.
 
+Seasonal outputs can stay lazy through this path. Callers that need scalar
+assertions or durable files should materialize or write the dataset explicitly.
+
 The important boundary is that `impacts` owns the kernel and its contracts, but
 not scenario assembly or data-discovery logic above it.
 

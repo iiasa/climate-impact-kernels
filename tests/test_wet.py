@@ -225,7 +225,9 @@ class WetCoolingContractTest(unittest.TestCase):
 
     def test_aggregate_seasonal_wet_cooling_impacts_uses_climateresponse(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        seasonal = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="seasonal")
+        seasonal = evaluate_kernel(
+            create_wet_cooling_kernel(), mapping, self.climate, duration="seasonal"
+        ).compute()
 
         self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
         self.assertEqual(seasonal.coords["season"].values.tolist(), ["DJF", "MAM", "JJA", "SON"])
