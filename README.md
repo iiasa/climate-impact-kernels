@@ -1,112 +1,118 @@
-`impacts` is organized as `impacts.<domain>`.
+`impacts` is a library of domain-specific climate-impact contracts, mappings,
+and physics kernels.
+
+It is organized as `impacts.<domain>`, not as a pipeline CLI.
 
 Current domains:
 
 - `impacts.thermoelectric`
 - `impacts.buildings`
 
-The package is a library of domain contracts and transformations, not a
-pipeline CLI.
+## What belongs here
 
-## Separation Of Concerns
+`impacts` owns:
 
-`impacts` owns domain contracts, joins, and impact equations. It does not open
-NetCDF files, discover datasets, or provide general xarray preprocessing
-helpers. Those array-native transforms belong in `climateresponse`, which is an
-explicit local dependency of this package.
+- domain contracts and validation
+- joins from climate inputs to domain entities
+- physics kernels and assumptions
+- domain-specific aggregation targets
+- checked-in artifacts that encode validated mappings
 
-The intended boundary is:
+`impacts` does not own:
 
-- `climateresponse`: reusable xarray transforms such as annual or seasonal
-  aggregation once arrays are already loaded.
-- `impacts`: domain-specific contracts and physics operating on already-opened
-  arrays or tables.
+- generic xarray preprocessing helpers
+- dataset discovery or catalog logic
+- project-specific workflow orchestration
+- generic warming-level mechanics
 
-If a reusable xarray manipulation step is missing for this workflow, add it to
-`climateresponse` first and then consume it here rather than reimplementing the
-helper inside `impacts`.
+Those reusable array-native transforms belong in `climateresponse`, which is an
+explicit dependency of this package.
 
-## Buildings
+If a missing step is generic across domains, add it to `climateresponse` first
+and consume it here rather than rebuilding it inside `impacts`.
 
-`impacts.buildings.chilled` evaluates the CHILLED pathway through the
-`ImpactKernel` contract. Climate input is daily near-surface air temperature
-on the archetype mapping. Solar irradiance is carried as a fixed EWEMBI
-monthly climatology attached to the mapping table rather than as a time-
-varying climate input. Output is emitted at the standard kernel durations
-(`native`, `daily`, `monthly`, `seasonal`).
+## Read This First
 
-The buildings kernel now targets the ALPS2025 archetype contract only.
-`arch_input_reg.csv` is consumed with `building_type`, `urt`, `arch`, and
-`region` as first-class dimensions, including the explicit cross-combination
-rows (`sfh×urban`, `mfh×rural`) present in the source table. `impacts` treats
-those rows as upstream modeling assumptions, not as missing data to be repaired
-back into older urban/rural proxy rules.
+- [docs/thermoelectric.md](docs/thermoelectric.md)
+- [docs/buildings.md](docs/buildings.md)
+- [docs/workflows.md](docs/workflows.md)
 
-Upstream responsibilities remain outside the pure kernel boundary:
+Then open the concrete modules you need:
 
-- providing any parametric-run table path (`CHILLED_PARAMETRIC_PATH`) when a
-  scenario workflow wants to derive `ChilledEnergyAssumptions` from
-  `par_var.csv`
-- assembling scenario/run definitions
-- raster generation and spatial packaging beyond the validated archetype CSV
+- `impacts/thermoelectric/__init__.py`
+- `impacts/buildings/chilled.py`
+- `impacts/kernel.py`
+- `impacts/isimip.py`
 
-Current thermo-electric artifacts:
+## Package Shape
 
-- `data/unit_cell_mapping.parquet`
-  Exact coordinate-only unit-to-cell mapping.
-- `data/recovered_unit_cell_mapping.parquet`
-  Conservative extension of the unit mapping that adds only safe inherited
-  coordinates from shared `LOCATIONID`s where all coordinate-bearing siblings
-  share one exact point.
-- `data/location_cell_mapping.parquet`
-  Location-normalized mapping that collapses only single-cell `LOCATIONID`s and
-  preserves ambiguous sites as explicit location-cell splits.
-- `data/country_rollup.parquet`
-  Country rollup derived from the location mapping. MESSAGE regional semantics
-  are intentionally out of scope here.
-- `data/unit_cooling_mapping.parquet`
-  Per-unit technology-to-cooling contract for downstream wet/dry physics.
+### `impacts.thermoelectric`
 
-## Provenance
+Thermo-electric plant mapping, cooling classification, wet/dry kernel
+construction, and regional aggregation.
 
-The thermoelectric mapping artifacts in this package are derived from a
-preconstructed global unit-level fleet table of thermal power plants with unit
-attributes, cooling assignments, and partial coordinate coverage. The package
-materializes contract artifacts from that fleet table rather than reconstructing
-the fleet from raw registries inside this repository.
+Important modules:
 
-The wet-cooling kernel follows the withdrawal-intensity and usable-capacity
-framework reported in:
+- `mapping.py`
+- `cooling.py`
+- `wet.py`
+- `dry.py`
+- `aggregation.py`
 
-- Li, S. et al. Global hydroclimatic risks and strategic decommissioning
-  pathways for thermal power units. `Nature Sustainability`.
-  <https://doi.org/10.1038/s41893-025-01692-9>
+Important checked-in artifacts under `data/`:
 
-The dry-cooling kernel follows the dry-cooling efficiency-loss framework
-reported in:
+- `unit_cell_mapping.parquet`
+- `recovered_unit_cell_mapping.parquet`
+- `location_cell_mapping.parquet`
+- `country_rollup.parquet`
+- `unit_cooling_mapping.parquet`
 
-- Qin, Y. et al. Global assessment of the carbon-water tradeoff of dry cooling
-  for thermal power generation. `Nature Water` 1, 682-693.
-  <https://doi.org/10.1038/s44221-023-00120-6>
+### `impacts.buildings`
 
-## Spatial Gap
+The `buildings` domain currently centers on
+`impacts.buildings.chilled`, which evaluates the CHILLED pathway
+through the shared `ImpactKernel` contract.
 
-The source fleet table contains `43,031` thermo-electric units. Exact source
-coordinates exist for `25,652` units (`2,596.9 GW`).
+Important modules:
 
-The conservative recovery path implemented here adds only units whose missing
-coordinates can be inherited safely from the same `LOCATIONID`. This recovers
-about `605` additional units (`76.7 GW`). The remainder of the missing fleet is
-left unresolved on purpose.
+- `buildings/chilled.py`
+- `kernel.py`
+- `isimip.py`
 
-What is not done here:
+## Design Constraints
 
-- fuzzy record linkage against external registries
-- name-based geocoding
-- heuristic country-centroid or subnational imputation
-- MESSAGE region assignment
+- The package stays domain-first. Reusable numerical transforms belong in
+  `climateresponse`.
+- `kernel.py` is the shared evaluation contract for domain kernels. Duration is
+  part of evaluation, not a separate downstream convention.
+- Thermoelectric outputs may be aggregated to countries or MESSAGE R12 regions,
+  but MESSAGE regional semantics are not embedded in the mapping artifacts.
+- The buildings CHILLED kernel targets the ALPS2025 archetype contract. Do not
+  silently coerce it back to older proxy schemas.
 
-The unresolved spatial gap is therefore a source-data limitation, not a hidden
-inference step. Downstream workflows can choose between exact-only mappings and
-the conservative recovered mapping depending on how much provenance risk they
-want to accept.
+## Provenance Notes
+
+The thermoelectric artifacts are built from a preconstructed global fleet table
+with unit attributes, cooling assignments, and partial coordinate coverage. The
+package materializes contract artifacts from that source table; it does not
+reconstruct the fleet from raw registries in this repository.
+
+The conservative recovery path intentionally leaves much of the missing fleet
+unresolved rather than inferring locations heuristically.
+
+## Development
+
+Use `uv` for local execution.
+
+Start with the relevant tests for the surface you changed:
+
+- `tests/test_mapping.py`
+- `tests/test_cooling.py`
+- `tests/test_wet.py`
+- `tests/test_dry.py`
+- `tests/test_aggregation.py`
+- `tests/test_isimip.py`
+- `tests/test_buildings.py`
+- `tests/test_recovery.py`
+
+Run a focused subset unless your change crosses domain boundaries.
