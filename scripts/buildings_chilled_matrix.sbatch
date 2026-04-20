@@ -6,9 +6,11 @@
 #     submits the full 400-task array (5 GCM × 4 scenario × 20 archetype combo)
 #     at 32 GiB / task with 90-minute wall clock.
 #   sbatch --array=0 buildings_chilled_matrix.sbatch
-#     smoke-verify a single task (GFDL × ssp126 × sfh × rur × s1 at index 0).
-#   sbatch --array=0,80,160,240,320 buildings_chilled_matrix.sbatch
-#     run one combo per GCM (sfh/rur/s1 across all GCMs for GCM-spread check).
+#     smoke-verify the heaviest historical task (GFDL × historical × sfh × rur × s1).
+#   sbatch --array=20 buildings_chilled_matrix.sbatch
+#     smoke-verify the first ssp126 task (GFDL × ssp126 × sfh × rur × s1).
+#   sbatch --array=20,100,180,260,340 buildings_chilled_matrix.sbatch
+#     run the first ssp126 combo once per GCM for a GCM-spread check.
 #
 # Lives at ~/job/buildings_chilled_matrix.sbatch on the cluster.
 

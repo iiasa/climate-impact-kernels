@@ -126,6 +126,20 @@ def verify_tmp(path: Path) -> dict:
     }
 
 
+def remove_batch_dir(batch_dir: Path) -> None:
+    """Remove a per-task batch directory and raise if it persists."""
+
+    if not batch_dir.exists():
+        return
+
+    shutil.rmtree(batch_dir)
+    for _ in range(5):
+        if not batch_dir.exists():
+            return
+        time.sleep(0.2)
+    raise RuntimeError(f"batch directory persisted after cleanup: {batch_dir}")
+
+
 def main() -> int:
     array_index = int(os.environ["SLURM_ARRAY_TASK_ID"])
     combo = dispatch(array_index)
@@ -252,6 +266,9 @@ def main() -> int:
         if tmp_path.exists():
             tmp_path.unlink()
         raise
+    finally:
+        combined.close()
+        stage("combined dataset closed")
     stage("to_netcdf returned")
 
     info = verify_tmp(tmp_path)
@@ -260,7 +277,7 @@ def main() -> int:
     if info["any_finite"]:
         tmp_path.rename(final_path)
         stage(f"renamed -> {final_path.name}")
-        shutil.rmtree(batch_dir, ignore_errors=True)
+        remove_batch_dir(batch_dir)
         stage(f"cleaned up per-batch tmp dir {batch_dir}")
         rc = 0
     else:
