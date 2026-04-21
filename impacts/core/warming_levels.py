@@ -1,30 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from typing import TypeAlias
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 
+ArrayLike: TypeAlias = xr.DataArray | xr.Dataset
 
 DEFAULT_QUANTILES = (0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95)
-
-
-@dataclass(frozen=True)
-class WarmingLevelAssignments:
-    """Year-to-warming-level assignments across a set of GMT paths.
-
-    Produced by ``build_warming_level_assignments`` and consumed by
-    ``attach_warming_levels``. The design follows the two-dimensional
-    GMT-binned lookup pattern used by rimeX
-    (https://github.com/iiasa/rimeX) for probabilistic scenario exploration.
-    """
-
-    table: pd.DataFrame
-    target_levels: tuple[float, ...]
-    path_columns: tuple[str, ...]
-    year_column: str
+TARGET_LEVEL_DIM = "target_warming_level"
 
 
 def match_warming_levels(
@@ -128,18 +113,13 @@ def build_warming_level_assignments(
     min_warming_level: float = 0.0,
     bin_width: float = 0.1,
     max_warming_level: float | None = None,
-    year_column: str = "year",
-) -> WarmingLevelAssignments:
-    """Bin each GMT year to the nearest warming level across multiple paths.
+    year_dim: str = "year",
+) -> xr.Dataset:
+    """Assign each path/year pair to the nearest warming level.
 
-    Each key in ``gmt_by_path`` is a tuple identifying a GMT path (for example
-    ``(gcm, scenario)``), and ``path_columns`` gives the column names in the
-    resulting table. The shared target-level grid is derived from the observed
-    GMT range and ``bin_width``.
-
-    This is the table-assembly counterpart of ``assign_years_to_levels``,
-    intended for rimeX-compatible two-dimensional GMT lookups
-    (https://github.com/iiasa/rimeX).
+    Returns an xarray Dataset indexed by the explicit path dimensions plus
+    ``year_dim``. This is the shared assignment object consumed by
+    ``attach_warming_levels``.
     """
 
     path_columns = tuple(path_columns)
@@ -153,11 +133,12 @@ def build_warming_level_assignments(
     paths = list(gmt_by_path.items())
     if not paths:
         raise ValueError("gmt_by_path must not be empty")
-    for key, _ in paths:
+    for key, gmt in paths:
         if len(key) != len(path_columns):
             raise ValueError(
                 f"path key {key!r} does not match path_columns {path_columns!r}"
             )
+        _validate_gmt(gmt=gmt, dim=year_dim)
 
     resolved_max = (
         max_warming_level
@@ -166,149 +147,172 @@ def build_warming_level_assignments(
     )
     upper = max(resolved_max, min_warming_level)
     level_count = int(np.ceil((upper - min_warming_level) / bin_width)) + 1
-    target_levels = tuple(
-        np.round(
-            min_warming_level + np.arange(level_count, dtype=float) * bin_width,
-            decimals=6,
-        ).tolist()
+    target_levels = np.round(
+        min_warming_level + np.arange(level_count, dtype=float) * bin_width,
+        decimals=6,
     )
 
-    frames: list[pd.DataFrame] = []
+    per_path: list[xr.Dataset] = []
     for key, gmt in paths:
-        assignments = assign_years_to_levels(gmt=gmt, target_levels=target_levels)
-        frame = pd.DataFrame(
+        assigned = assign_years_to_levels(
+            gmt=gmt,
+            target_levels=target_levels,
+            dim=year_dim,
+        )
+        expanded = assigned.expand_dims(
             {
-                **{column: value for column, value in zip(path_columns, key, strict=True)},
-                year_column: np.asarray(assignments["year"].values, dtype=int),
-                "warming_level": np.asarray(
-                    assignments["warming_level"].values, dtype=float
-                ),
-                "actual_warming": np.asarray(
-                    assignments["actual_warming"].values, dtype=float
-                ),
-                "absolute_error": np.asarray(
-                    assignments["absolute_error"].values, dtype=float
-                ),
+                column: xr.IndexVariable(column, [value])
+                for column, value in zip(path_columns, key, strict=True)
             }
         )
-        frames.append(frame)
+        per_path.append(expanded)
 
-    return WarmingLevelAssignments(
-        table=pd.concat(frames, ignore_index=True),
-        target_levels=target_levels,
-        path_columns=path_columns,
-        year_column=year_column,
+    assignments = xr.combine_by_coords(
+        per_path,
+        combine_attrs="drop_conflicts",
+        join="outer",
+    ).sortby(year_dim)
+    for column in reversed(path_columns):
+        assignments = assignments.sortby(column)
+
+    assignments = assignments.assign_coords(
+        {TARGET_LEVEL_DIM: (TARGET_LEVEL_DIM, target_levels)}
     )
+    assignments.attrs.update(
+        {
+            "description": "Nearest-neighbor warming-level assignments by GMT path and year",
+            "path_dims": ",".join(path_columns),
+            "year_dim": year_dim,
+            "warming_level_units": "K",
+        }
+    )
+    return assignments
 
 
 def attach_warming_levels(
-    frame: pd.DataFrame,
-    assignments: WarmingLevelAssignments,
+    data: ArrayLike,
+    assignments: xr.Dataset,
     *,
-    time_column: str = "time",
-) -> pd.DataFrame:
-    """Join warming-level assignments onto a long-format impact table.
+    time_dim: str = "time",
+) -> ArrayLike:
+    """Attach warming-level diagnostics to a time- or year-indexed xarray object."""
 
-    Matches rows by ``assignments.path_columns`` and the year component of
-    ``time_column``. Raises if any row cannot be assigned.
-    """
+    if "warming_level" not in assignments.data_vars:
+        raise ValueError("assignments must define a 'warming_level' variable")
 
-    required = (*assignments.path_columns, time_column)
-    missing = set(required).difference(frame.columns)
+    year_dim = str(assignments.attrs.get("year_dim", "year"))
+    path_dims = _assignment_path_dims(assignments, year_dim=year_dim)
+    missing = set(path_dims).difference(data.dims)
     if missing:
         raise ValueError(
-            f"frame missing required columns: {', '.join(sorted(missing))}"
+            f"data missing required assignment path dims: {', '.join(sorted(missing))}"
         )
 
-    enriched = (
-        frame.assign(**{time_column: lambda data: pd.to_datetime(data[time_column])})
-        .assign(**{assignments.year_column: lambda data: data[time_column].dt.year})
-        .merge(
-            assignments.table,
-            on=[*assignments.path_columns, assignments.year_column],
-            how="left",
-            validate="many_to_one",
-        )
+    selection = assignments[["warming_level", "actual_warming", "absolute_error"]].sel(
+        {dim: data[dim] for dim in path_dims}
     )
-    if enriched["warming_level"].isna().any():
-        missing_rows = (
-            enriched.loc[
-                enriched["warming_level"].isna(),
-                [*assignments.path_columns, assignments.year_column],
-            ]
-            .drop_duplicates()
-            .sort_values([*assignments.path_columns, assignments.year_column])
+
+    if time_dim in data.dims:
+        years = xr.DataArray(
+            data[time_dim].dt.year.values,
+            dims=(time_dim,),
+            coords={time_dim: data[time_dim]},
+            name=year_dim,
         )
+        selection = selection.sel({year_dim: years})
+    elif year_dim in data.dims:
+        selection = selection.sel({year_dim: data[year_dim]})
+    else:
         raise ValueError(
-            "missing warming-level assignments for "
-            f"{missing_rows.to_dict(orient='records')[:10]}"
+            f"data must include either {time_dim!r} or {year_dim!r} to attach warming levels"
         )
-    return enriched
+
+    if bool(selection["warming_level"].isnull().any()) and bool(
+        _uncovered_nonnull_data(data, selection["warming_level"]).any()
+    ):
+        raise ValueError("assignments do not cover the non-null data domain")
+
+    return data.assign_coords(
+        warming_level=selection["warming_level"],
+        actual_warming=selection["actual_warming"],
+        absolute_error=selection["absolute_error"],
+    )
 
 
-def build_warming_level_quantile_map(
-    frame: pd.DataFrame,
+def build_warming_level_quantile_surface(
+    values: xr.DataArray,
     *,
-    value_column: str,
-    group_columns: Sequence[str],
+    sample_dims: Sequence[str],
     quantiles: Sequence[float] = DEFAULT_QUANTILES,
-    warming_level_column: str = "warming_level",
+    warming_level_coord: str = "warming_level",
 ) -> xr.Dataset:
-    """Quantile-map a value column over warming levels within each group.
+    """Build a quantile surface from a GWL-labelled indicator array."""
 
-    Returns an ``xr.Dataset`` indexed by ``(*group_columns, warming_level,
-    quantile)`` with per-bin ``sample_size``. This is the shape rimeX
-    (https://github.com/iiasa/rimeX) expects for two-dimensional GMT lookups.
-    """
+    if values.name is None:
+        raise ValueError("values must have a name")
+
+    sample_dims = tuple(sample_dims)
+    if not sample_dims:
+        raise ValueError("sample_dims must not be empty")
+
+    missing_dims = set(sample_dims).difference(values.dims)
+    if missing_dims:
+        raise ValueError(
+            f"values missing sample dims: {', '.join(sorted(missing_dims))}"
+        )
+    if warming_level_coord not in values.coords:
+        raise ValueError(f"values must define a {warming_level_coord!r} coordinate")
+
+    warming_level = values.coords[warming_level_coord]
+    invalid_dims = set(warming_level.dims).difference(sample_dims)
+    if invalid_dims:
+        raise ValueError(
+            f"{warming_level_coord!r} dims must be a subset of sample_dims; got {warming_level.dims!r}"
+        )
 
     quantiles = tuple(float(value) for value in quantiles)
     if not quantiles:
         raise ValueError("quantiles must not be empty")
 
-    required = (*group_columns, warming_level_column, value_column)
-    missing = set(required).difference(frame.columns)
-    if missing:
-        raise ValueError(
-            f"frame missing required columns: {', '.join(sorted(missing))}"
-        )
+    stacked = values.stack(__sample=sample_dims)
+    valid_levels = stacked[warming_level_coord].notnull()
+    if warming_level.dtype.kind in {"U", "S", "O"}:
+        valid_levels = valid_levels & (stacked[warming_level_coord] != "")
+    stacked = stacked.where(valid_levels, drop=True)
 
-    grouping = [*group_columns, warming_level_column]
-    quantile_frame = (
-        frame.groupby(grouping, observed=True)[value_column]
-        .quantile(quantiles)
-        .rename(value_column)
-        .reset_index()
-        .rename(columns={f"level_{len(grouping)}": "quantile"})
+    quantile_surface = stacked.groupby(warming_level_coord).quantile(
+        quantiles,
+        dim="__sample",
     )
-    count_frame = (
-        frame.groupby(grouping, observed=True)
-        .size()
-        .rename("sample_size")
-        .reset_index()
-    )
-
-    quantile_map = quantile_frame.set_index(
-        [*group_columns, warming_level_column, "quantile"]
-    ).to_xarray()
-    sample_size = count_frame.set_index(
-        [*group_columns, warming_level_column]
-    ).to_xarray()
+    sample_size = stacked.groupby(warming_level_coord).count(dim="__sample").rename("sample_size")
 
     return (
-        xr.merge([quantile_map, sample_size])
-        .sortby(warming_level_column)
+        xr.merge([quantile_surface.rename(values.name).to_dataset(), sample_size.to_dataset()])
+        .sortby(warming_level_coord)
         .sortby("quantile")
         .assign_attrs(
             {
                 "description": (
-                    f"Quantile map for {value_column} conditioned on annual-mean GMT"
+                    f"Quantile surface for {values.name} conditioned on annual-mean GMT"
                 ),
                 "warming_level_units": "K",
-                "value_column": value_column,
-                "group_columns": ",".join(group_columns),
+                "sample_dims": ",".join(sample_dims),
+                "value_name": values.name,
             }
         )
     )
+
+
+def _assignment_path_dims(assignments: xr.Dataset, *, year_dim: str) -> tuple[str, ...]:
+    return tuple(dim for dim in assignments["warming_level"].dims if dim != year_dim)
+
+
+def _uncovered_nonnull_data(data: ArrayLike, warming_level: xr.DataArray) -> xr.DataArray:
+    if isinstance(data, xr.Dataset):
+        present = data.to_array().notnull().any(dim="variable")
+    else:
+        present = data.notnull()
+    return warming_level.isnull().broadcast_like(present) & present
 
 
 def _validate_gmt(gmt: xr.DataArray, dim: str) -> None:

@@ -14,11 +14,12 @@ used to move between annual GMT paths and warming-level-indexed response data.
 - `bin_by_warming_level`
   Reduces a year-indexed value array by the assigned warming levels.
 - `build_warming_level_assignments`
-  Builds a table of year-to-level assignments across multiple GMT paths.
+  Builds an xarray assignment dataset indexed by explicit path dims plus year.
 - `attach_warming_levels`
-  Joins that assignment table back onto a long-format data frame.
-- `build_warming_level_quantile_map`
-  Builds quantile maps over warming levels within explicit groups.
+  Attaches those path/year assignments back onto a time- or year-indexed
+  xarray object as coordinates.
+- `build_warming_level_quantile_surface`
+  Builds quantile surfaces from a GWL-labelled indicator `DataArray`.
 
 ## Current Interpretation
 
@@ -28,7 +29,7 @@ The current design follows the production `rimeX` findings:
 - diagnostic quantities such as `actual_warming`, `accumulated_warming`, and
   `warming_rate` are part of the contract
 - the shared surface supports two-dimensional GMT lookup patterns across
-  multiple paths
+  multiple paths without converting the hot path to tables
 
 ## Boundary
 
@@ -38,4 +39,6 @@ It does not own:
 
 - file discovery for GMT series
 - project-specific scenario objects
+- sector adapters that turn parquet tables or domain-specific xarray layouts
+  into indicator arrays
 - the non-stationary GEV workflow used in production `rimeX`

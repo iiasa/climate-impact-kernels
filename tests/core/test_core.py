@@ -13,6 +13,7 @@ except ImportError:
     da = None
 
 from climateresponse import (
+    aggregate_by_region,
     aggregate_annual,
     aggregate_monthly,
     aggregate_seasonal,
@@ -22,11 +23,12 @@ from climateresponse import (
     assign_years_to_levels,
     bin_by_warming_level,
     build_warming_level_assignments,
-    build_warming_level_quantile_map,
+    build_warming_level_quantile_surface,
     compute_anomaly,
     compute_running_mean,
     deterministic_resampling,
     evaluate_mapped_dataset,
+    grid_cell_area,
     interpolate_along_warming_level,
     match_warming_levels,
     normalize_pressure,
@@ -442,6 +444,54 @@ class SpatialTest(unittest.TestCase):
 
         self.assertEqual(attached.sel(entity=101).item(), 9.0)
 
+    def test_grid_cell_area_returns_positive_weights(self) -> None:
+        weights = grid_cell_area(
+            xr.DataArray([0.0, 1.0], dims=["lat"], coords={"lat": [0.0, 1.0]}),
+            xr.DataArray([10.0, 11.0], dims=["lon"], coords={"lon": [10.0, 11.0]}),
+        )
+
+        self.assertEqual(weights.dims, ("lat", "lon"))
+        self.assertTrue((weights > 0).all().item())
+
+    def test_aggregate_by_region_supports_weighted_mean_and_sum(self) -> None:
+        values = xr.DataArray(
+            [[[1.0, 2.0], [3.0, 4.0]]],
+            dims=["time", "lat", "lon"],
+            coords={"time": [0], "lat": [0.0, 1.0], "lon": [10.0, 11.0]},
+            name="value",
+        )
+        regions = xr.DataArray(
+            [["A", "A"], ["B", "B"]],
+            dims=["lat", "lon"],
+            coords={"lat": [0.0, 1.0], "lon": [10.0, 11.0]},
+            name="country",
+        )
+        weights = xr.DataArray(
+            [[1.0, 2.0], [3.0, 4.0]],
+            dims=["lat", "lon"],
+            coords={"lat": [0.0, 1.0], "lon": [10.0, 11.0]},
+        )
+
+        regional_mean = aggregate_by_region(
+            values,
+            regions,
+            weights=weights,
+            reducer="weighted_mean",
+            region_dim="country",
+        )
+        regional_sum = aggregate_by_region(
+            values,
+            regions,
+            weights=weights,
+            reducer="weighted_sum",
+            region_dim="country",
+        )
+
+        self.assertAlmostEqual(regional_mean.sel(country="A").item(), 5.0 / 3.0)
+        self.assertAlmostEqual(regional_mean.sel(country="B").item(), 25.0 / 7.0)
+        self.assertAlmostEqual(regional_sum.sel(country="A").item(), 5.0)
+        self.assertAlmostEqual(regional_sum.sel(country="B").item(), 25.0)
+
     def test_aggregate_entity_dataarray_weighted_mean(self) -> None:
         values = xr.DataArray(
             [[0.5, 1.0, 0.25]],
@@ -600,7 +650,7 @@ class StatsTest(unittest.TestCase):
 
 
 class WarmingLevelLookupTest(unittest.TestCase):
-    def test_assignments_attach_and_quantile_map_round_trip(self) -> None:
+    def test_assignments_attach_and_quantile_surface_round_trip(self) -> None:
         gmt_by_path = {
             ("GFDL-ESM4", "historical"): xr.DataArray(
                 [0.1, 0.6],
@@ -613,15 +663,22 @@ class WarmingLevelLookupTest(unittest.TestCase):
                 coords={"year": [2015, 2016]},
             ),
         }
-        frame = pd.DataFrame(
-            {
-                "impact_type": ["dry", "dry", "wet", "wet"],
-                "gcm": ["GFDL-ESM4"] * 4,
-                "scenario": ["historical", "historical", "ssp126", "ssp126"],
-                "time": ["1850-01-01", "1851-01-01", "2015-01-01", "2016-01-01"],
-                "region": ["A", "A", "A", "A"],
-                "value": [0.4, 0.6, 0.7, 0.9],
-            }
+        values = xr.DataArray(
+            [[
+                [
+                    [[0.4], [0.6], [np.nan], [np.nan]],
+                    [[np.nan], [np.nan], [0.7], [0.9]],
+                ]
+            ]],
+            dims=["impact_type", "gcm", "scenario", "time", "region"],
+            coords={
+                "impact_type": ["wet"],
+                "gcm": ["GFDL-ESM4"],
+                "scenario": ["historical", "ssp126"],
+                "time": pd.to_datetime(["1850-01-01", "1851-01-01", "2015-01-01", "2016-01-01"]),
+                "region": ["A"],
+            },
+            name="value",
         )
 
         assignments = build_warming_level_assignments(
@@ -629,24 +686,28 @@ class WarmingLevelLookupTest(unittest.TestCase):
             path_columns=("gcm", "scenario"),
             bin_width=0.5,
         )
-        enriched = attach_warming_levels(frame, assignments)
-        quantile_map = build_warming_level_quantile_map(
+        enriched = attach_warming_levels(values, assignments)
+        quantile_surface = build_warming_level_quantile_surface(
             enriched,
-            value_column="value",
-            group_columns=("impact_type", "region"),
+            sample_dims=("gcm", "scenario", "time"),
             quantiles=(0.5,),
         )
 
-        self.assertEqual(assignments.target_levels, (0.0, 0.5, 1.0))
-        self.assertEqual(enriched["warming_level"].tolist(), [0.0, 0.5, 1.0, 1.0])
+        self.assertEqual(assignments["target_warming_level"].values.tolist(), [0.0, 0.5, 1.0])
+        historical_levels = enriched["warming_level"].sel(
+            gcm="GFDL-ESM4",
+            scenario="historical",
+        ).values
+        self.assertEqual(historical_levels[:2].tolist(), [0.0, 0.5])
+        self.assertTrue(np.isnan(historical_levels[2:]).all())
         self.assertEqual(
-            quantile_map["sample_size"]
+            quantile_surface["sample_size"]
             .sel(impact_type="wet", region="A", warming_level=1.0)
             .item(),
             2,
         )
         self.assertAlmostEqual(
-            quantile_map["value"]
+            quantile_surface["value"]
             .sel(impact_type="wet", region="A", warming_level=1.0, quantile=0.5)
             .item(),
             0.8,

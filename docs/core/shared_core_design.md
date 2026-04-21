@@ -106,12 +106,16 @@ In this repository those reusable mechanics are implemented as xarray-native ker
   not fragment into one-chunk-per-season-year layouts
 - spatial weighting works on masked arrays over explicit dimensions
 - warming-level interpolation stays on named warming-level axes
+- RIME-X preprocessing stays xarray-first: callers attach `warming_level`
+  coordinates to indicator arrays and then build quantile surfaces without a
+  table join/groupby layer in the shared core
 
 The following stay outside the core:
 
 - `hydro_preprocess` repo-specific file discovery and shell wrappers
 - `rimeX` global config object and project-specific parameter access patterns
-- `rimeX` quantile-map assembly as an xarray orchestration layer
+- sector-specific adapters that reshape source tables or entity outputs into
+  indicator arrays ready for warming-level attachment
 - non-stationary GEV fitting and return-period production for extremes
 - output layouts tied to a single downstream consumer
 - Julia GMT implementation details unless later benchmarks show Python is insufficient
