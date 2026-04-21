@@ -48,6 +48,18 @@ def parse_args() -> argparse.Namespace:
         default=Path("/home/raghunathan/Ed_Jones/raw_data/climate"),
     )
     parser.add_argument("--country-column", type=str, default="ISO3")
+    parser.add_argument(
+        "--gaul-raster-path",
+        type=Path,
+        default=None,
+        help="Override the GAUL country raster path; defaults to impacts.buildings.chilled.DEFAULT_GAUL_RASTER_PATH.",
+    )
+    parser.add_argument(
+        "--gaul-csv-path",
+        type=Path,
+        default=None,
+        help="Override the GAUL lookup CSV path; defaults to impacts.buildings.chilled.DEFAULT_GAUL_CSV_PATH.",
+    )
     parser.add_argument("--bin-width", type=float, default=0.1)
     parser.add_argument("--min-warming-level", type=float, default=0.0)
     parser.add_argument("--max-warming-level", type=float, default=None)
@@ -79,7 +91,12 @@ def main() -> None:
                 f"no CHILLED seasonal files match --scenarios={sorted(allowed)}"
             )
 
-    country_raster = load_country_raster(country_column=args.country_column)
+    raster_kwargs = {"country_column": args.country_column}
+    if args.gaul_raster_path is not None:
+        raster_kwargs["gaul_raster_path"] = args.gaul_raster_path
+    if args.gaul_csv_path is not None:
+        raster_kwargs["gaul_csv_path"] = args.gaul_csv_path
+    country_raster = load_country_raster(**raster_kwargs)
     aggregated_datasets: list[xr.Dataset] = []
     for path in source_paths:
         metadata = parse_chilled_matrix_filename(path)
