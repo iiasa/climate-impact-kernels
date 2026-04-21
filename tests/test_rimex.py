@@ -66,15 +66,24 @@ class ThermoelectricRimeXTest(unittest.TestCase):
                 )
             )
 
-    def test_aggregate_thermoelectric_seasonal_uses_simple_means(self) -> None:
+    def test_aggregate_thermoelectric_seasonal_uses_strict_means(self) -> None:
         monthly = xr.DataArray(
-            [[[[[1.0], [2.0], [3.0]]]]],
+            [[[[[1.0], [2.0], [3.0], [np.nan], [np.nan], [4.0]]]]],
             dims=["cooling", "gcm", "scenario", "time", "country"],
             coords={
                 "cooling": ["wet"],
                 "gcm": ["GFDL-ESM4"],
                 "scenario": ["historical"],
-                "time": pd.to_datetime(["2001-12-01", "2002-01-01", "2002-02-01"]),
+                "time": pd.to_datetime(
+                    [
+                        "2001-12-01",
+                        "2002-01-01",
+                        "2002-02-01",
+                        "2002-03-01",
+                        "2002-04-01",
+                        "2002-05-01",
+                    ]
+                ),
                 "country": ["A"],
             },
             name="ucr",
@@ -96,6 +105,18 @@ class ThermoelectricRimeXTest(unittest.TestCase):
                 country="A",
             ).item(),
             2.0,
+        )
+        self.assertTrue(
+            np.isnan(
+                seasonal.sel(
+                    cooling="wet",
+                    gcm="GFDL-ESM4",
+                    scenario="historical",
+                    season="MAM",
+                    year=2002,
+                    country="A",
+                ).item()
+            )
         )
 
 

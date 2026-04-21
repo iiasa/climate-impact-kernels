@@ -51,6 +51,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bin-width", type=float, default=0.1)
     parser.add_argument("--min-warming-level", type=float, default=0.0)
     parser.add_argument("--max-warming-level", type=float, default=None)
+    parser.add_argument(
+        "--scenarios",
+        nargs="+",
+        default=None,
+        help="Restrict to these scenarios. Default: use every scenario present under --source-root.",
+    )
     return parser.parse_args()
 
 
@@ -61,6 +67,17 @@ def main() -> None:
     source_paths = sorted(args.source_root.glob("seasonal_*.nc"))
     if not source_paths:
         raise FileNotFoundError(f"no CHILLED seasonal files found in {args.source_root}")
+    if args.scenarios is not None:
+        allowed = set(args.scenarios)
+        source_paths = [
+            path
+            for path in source_paths
+            if parse_chilled_matrix_filename(path)["scenario"] in allowed
+        ]
+        if not source_paths:
+            raise FileNotFoundError(
+                f"no CHILLED seasonal files match --scenarios={sorted(allowed)}"
+            )
 
     country_raster = load_country_raster(country_column=args.country_column)
     aggregated_datasets: list[xr.Dataset] = []
