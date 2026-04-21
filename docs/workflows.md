@@ -12,6 +12,13 @@ The thermoelectric workflow is:
 4. Evaluate entity-level outputs.
 5. Aggregate to countries or MESSAGE R12 regions in `aggregation.py`.
 
+The RIME-X thermoelectric adapters then:
+
+1. Load the monthly country parquet into an xarray `ucr` field.
+2. Attach annual-mean GMT-derived `warming_level` coordinates via
+   `climateresponse`.
+3. Build monthly or seasonal quantile surfaces from the GWL-labelled array.
+
 The mapping and cooling artifacts are durable contracts. If their logic changes,
 regenerate the checked-in outputs deliberately.
 
@@ -25,6 +32,15 @@ The CHILLED workflow is:
 4. Normalize climate inputs in `buildings/chilled.py`.
 5. Evaluate the kernel at `native`, `daily`, `monthly`, or `seasonal`
    duration.
+
+The seasonal RIME-X CHILLED adapter works one level downstream of that:
+
+1. Open each production seasonal entity file.
+2. Attach country labels and cell-area weights by sampling the GAUL raster.
+3. Aggregate entity outputs to countries with energy variables summed by area
+   and count variables averaged by area.
+4. Attach annual-mean GMT-derived `warming_level` coordinates and build
+   indicator-specific quantile surfaces.
 
 Seasonal outputs can stay lazy through this path. Callers that need scalar
 assertions or durable files should materialize or write the dataset explicitly.

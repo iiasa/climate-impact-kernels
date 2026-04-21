@@ -41,6 +41,8 @@ Then open the concrete modules you need:
 
 - `impacts/thermoelectric/__init__.py`
 - `impacts/buildings/chilled.py`
+- `impacts/thermoelectric/rimex.py`
+- `impacts/buildings/rimex.py`
 - `impacts/kernel.py`
 - `impacts/isimip.py`
 
@@ -58,6 +60,7 @@ Important modules:
 - `wet.py`
 - `dry.py`
 - `aggregation.py`
+- `rimex.py`
 
 Important checked-in artifacts under `data/`:
 
@@ -76,6 +79,7 @@ through the shared `ImpactKernel` contract.
 Important modules:
 
 - `buildings/chilled.py`
+- `buildings/rimex.py`
 - `kernel.py`
 - `isimip.py`
 
@@ -89,6 +93,19 @@ Important modules:
   but MESSAGE regional semantics are not embedded in the mapping artifacts.
 - The buildings CHILLED kernel targets the ALPS2025 archetype contract. Do not
   silently coerce it back to older proxy schemas.
+
+## RIME-X Adapters
+
+RIME-X preprocessing follows the repo boundary directly:
+
+- `climateresponse` owns the generic xarray-first warming-level attachment and
+  quantile-surface builders
+- `impacts.thermoelectric.rimex` reshapes the thermoelectric country parquet
+  into an xarray UCR field and derives seasonal UCR
+- `impacts.buildings.rimex` aggregates CHILLED entity outputs to countries and
+  attaches filename-derived archetype metadata
+
+The durable artifact scripts under `scripts/` remain the I/O boundary.
 
 ## Provenance Notes
 
