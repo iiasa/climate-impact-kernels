@@ -5,10 +5,10 @@ combo through ``run_chilled_gridded_ei`` using the #421-verified recipe:
 10-year outer year-batching with per-batch to_netcdf to a per-task tmp dir,
 ``xr.open_mfdataset`` coalesce to ``<final>.tmp``, finite-verify, atomic rename.
 
-Matrix layout (SLURM_ARRAY_TASK_ID in [0, 400)):
-  5 GCMs × 4 scenarios × 20 archetype combos
-  gcm_idx      = ARRAY_INDEX // 80
-  scenario_idx = (ARRAY_INDEX % 80) // 20
+Matrix layout (SLURM_ARRAY_TASK_ID in [0, 500)):
+  5 GCMs × 5 scenarios × 20 archetype combos
+  gcm_idx      = ARRAY_INDEX // 100
+  scenario_idx = (ARRAY_INDEX % 100) // 20
   combo_idx    = ARRAY_INDEX % 20
   bt_idx       = combo_idx // 10
   urt_idx      = (combo_idx % 10) // 5
@@ -37,16 +37,20 @@ from pathlib import Path
 import numpy as np
 
 GCMS = ("GFDL-ESM4", "IPSL-CM6A-LR", "MPI-ESM1-2-HR", "MRI-ESM2-0", "UKESM1-0-LL")
-SCENARIOS = ("historical", "ssp126", "ssp245", "ssp370")
+SCENARIOS = ("historical", "ssp126", "ssp245", "ssp370", "ssp585")
 SCENARIO_YEARS = {
     "historical": (1850, 2014),
     "ssp126": (2015, 2100),
     "ssp245": (2015, 2100),
     "ssp370": (2015, 2100),
+    "ssp585": (2015, 2100),
 }
 BUILDING_TYPES = ("sfh", "mfh")
 URTS = ("rur", "urb")
 VINTAGES = ("s1", "s2", "s3", "s51", "s52")
+COMBOS_PER_SCENARIO = len(BUILDING_TYPES) * len(URTS) * len(VINTAGES)
+TASKS_PER_GCM = len(SCENARIOS) * COMBOS_PER_SCENARIO
+TOTAL_TASKS = len(GCMS) * TASKS_PER_GCM
 
 YEAR_BATCH = 10
 TIME_CHUNK = 90
@@ -91,13 +95,15 @@ def stage(label: str, detail: str = "") -> None:
 
 
 def dispatch(array_index: int) -> dict:
-    if not (0 <= array_index < 400):
-        raise ValueError(f"SLURM_ARRAY_TASK_ID={array_index} outside [0, 400)")
-    gcm = GCMS[array_index // 80]
-    scenario = SCENARIOS[(array_index % 80) // 20]
-    combo_idx = array_index % 20
-    building_type = BUILDING_TYPES[combo_idx // 10]
-    urt = URTS[(combo_idx % 10) // 5]
+    if not (0 <= array_index < TOTAL_TASKS):
+        raise ValueError(
+            f"SLURM_ARRAY_TASK_ID={array_index} outside [0, {TOTAL_TASKS})"
+        )
+    gcm = GCMS[array_index // TASKS_PER_GCM]
+    scenario = SCENARIOS[(array_index % TASKS_PER_GCM) // COMBOS_PER_SCENARIO]
+    combo_idx = array_index % COMBOS_PER_SCENARIO
+    building_type = BUILDING_TYPES[combo_idx // (len(URTS) * len(VINTAGES))]
+    urt = URTS[(combo_idx % (len(URTS) * len(VINTAGES))) // len(VINTAGES)]
     vintage = VINTAGES[combo_idx % 5]
     year_start, year_end = SCENARIO_YEARS[scenario]
     return {

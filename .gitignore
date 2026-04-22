@@ -19,6 +19,10 @@ AGENTS.md
 # Local staging (UniCC SLURM scripts, smoke tests, ad-hoc drivers)
 _staging/
 
+# Codex scratch dir
+.codex
+.codex/
+
 # Licensed local-only WEPP/PLATTS-derived artifacts
 data/country_rollup.parquet
 data/imputed_wet_unit_cell_mapping.parquet

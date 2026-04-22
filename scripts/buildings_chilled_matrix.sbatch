@@ -3,14 +3,16 @@
 #
 # Invocation:
 #   sbatch buildings_chilled_matrix.sbatch
-#     submits the full 400-task array (5 GCM × 4 scenario × 20 archetype combo)
+#     submits the full 500-task array (5 GCM × 5 scenario × 20 archetype combo)
 #     at 32 GiB / task with 90-minute wall clock.
 #   sbatch --array=0 buildings_chilled_matrix.sbatch
 #     smoke-verify the heaviest historical task (GFDL × historical × sfh × rur × s1).
 #   sbatch --array=20 buildings_chilled_matrix.sbatch
 #     smoke-verify the first ssp126 task (GFDL × ssp126 × sfh × rur × s1).
-#   sbatch --array=20,100,180,260,340 buildings_chilled_matrix.sbatch
+#   sbatch --array=20,120,220,320,420 buildings_chilled_matrix.sbatch
 #     run the first ssp126 combo once per GCM for a GCM-spread check.
+#   sbatch --array=80,180,280,380,480 buildings_chilled_matrix.sbatch
+#     run the first ssp585 combo once per GCM for a tail-scenario spread check.
 #
 # Lives at ~/job/buildings_chilled_matrix.sbatch on the cluster.
 
@@ -18,7 +20,7 @@
 #SBATCH --time=01:30:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=1
-#SBATCH --array=0-399
+#SBATCH --array=0-499
 #SBATCH --output=/home/raghunathan/job/out/chilled_matrix_%A_%a.out
 #SBATCH --error=/home/raghunathan/job/out/chilled_matrix_%A_%a.err
 
