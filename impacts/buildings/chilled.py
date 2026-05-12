@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import yaml
-from climateresponse import EvaluationResult, normalize_temperature
-from climateresponse.spatial import attach_gridded_dataset
+from impacts.core import EvaluationResult, normalize_temperature
+from impacts.core.spatial import attach_gridded_dataset
 
 from impacts.kernel import (
     Duration,

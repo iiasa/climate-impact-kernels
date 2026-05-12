@@ -6,8 +6,8 @@ import re
 import numpy as np
 import pandas as pd
 import xarray as xr
-from climateresponse import attach_gridded_dataset, grid_cell_area
-from climateresponse.regions import aggregate_entity_dataset
+from impacts.core import attach_gridded_dataset, grid_cell_area
+from impacts.core.regions import aggregate_entity_dataset
 
 from impacts.buildings.chilled import DEFAULT_GAUL_CSV_PATH, DEFAULT_GAUL_RASTER_PATH
 

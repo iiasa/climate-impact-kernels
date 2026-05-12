@@ -1,6 +1,6 @@
 # Regions
 
-`climateresponse.regions` provides shared helpers for reading region
+`impacts.core.regions` provides shared helpers for reading region
 definitions and aggregating entity-indexed outputs to named regions.
 
 ## Shared Source Of Truth

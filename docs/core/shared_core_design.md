@@ -2,9 +2,12 @@
 
 ## Boundary
 
-`climateresponse` is a computational shared core for future climate-response workflows.
-It owns reusable transforms and contracts that recur across `hydro_preprocess`,
-`rimeX`, and the direct cooling-impact pipeline.
+`impacts.core` is the shared computational core for the `impacts` package.
+It owns reusable transforms and contracts that recur across domains
+(thermoelectric, buildings) and downstream RIME-X workflows. The subpackage
+was originally developed as a standalone `climateresponse` library and folded
+into `impacts` while preserving the boundary as a code-enforced rule
+(see [architecture.md](../architecture.md)).
 
 The package includes:
 

@@ -18,7 +18,7 @@ from typing import Literal, Sequence
 import numpy as np
 import pandas as pd
 import xarray as xr
-from climateresponse import aggregate_monthly
+from impacts.core import aggregate_monthly
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import xarray as xr
-from climateresponse import (
+from impacts.core import (
     EvaluationResult,
     normalize_pressure,
     normalize_temperature,

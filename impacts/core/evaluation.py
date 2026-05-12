@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import pandas as pd
 import xarray as xr
 
-from climateresponse.spatial import attach_gridded_dataset
+from .spatial import attach_gridded_dataset
 
 
 @dataclass(frozen=True)

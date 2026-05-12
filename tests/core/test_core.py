@@ -12,7 +12,7 @@ try:
 except ImportError:
     da = None
 
-from climateresponse import (
+from impacts.core import (
     aggregate_by_region,
     aggregate_annual,
     aggregate_monthly,
@@ -37,7 +37,7 @@ from climateresponse import (
     weighted_average,
     weighted_quantiles,
 )
-from climateresponse.regions import (
+from impacts.core.regions import (
     aggregate_entity_dataarray,
     aggregate_entity_dataset,
     common_definitions_root,

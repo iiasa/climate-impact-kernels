@@ -1,6 +1,6 @@
 # Warming Levels
 
-`climateresponse.warming_levels` provides the reusable warming-level mechanics
+`impacts.core.warming_levels` provides the reusable warming-level mechanics
 used to move between annual GMT paths and warming-level-indexed response data.
 
 ## Main Entry Points

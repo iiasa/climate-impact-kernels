@@ -1,10 +1,10 @@
 # Evaluation
 
-`climateresponse.evaluation` provides reusable orchestration for applying a
+`impacts.core.evaluation` provides reusable orchestration for applying a
 physics kernel to climate inputs after normalization and spatial attachment.
 
-It is the shared contract behind downstream repos that want to evaluate
-array-native kernels without rebuilding the same xarray plumbing.
+It is the shared contract behind domain kernels that want to evaluate
+array-native operations without rebuilding the same xarray plumbing.
 
 ## Main Entry Points
 
