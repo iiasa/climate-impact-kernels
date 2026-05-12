@@ -1,17 +1,17 @@
 """Thermo-electric power mapping utilities."""
 
-from impacts.thermoelectric.aggregation import (
+from impacts.domain.thermoelectric.aggregation import (
     aggregate_thermoelectric_file,
     aggregate_thermoelectric_regions,
     write_aggregated_thermoelectric_file,
 )
-from impacts.thermoelectric.cooling import (
+from impacts.domain.thermoelectric.cooling import (
     DEFAULT_COOLING_COLUMNS,
     build_unit_cooling_mapping,
     classify_technology_family,
     write_unit_cooling_mapping,
 )
-from impacts.thermoelectric.dry import (
+from impacts.domain.thermoelectric.dry import (
     DEFAULT_DRY_COOLING_VARIABLE_NAMES,
     DRY_COOLING_VARIABLES,
     REQUIRED_DRY_COOLING_VARIABLES,
@@ -21,7 +21,7 @@ from impacts.thermoelectric.dry import (
     create_dry_cooling_kernel,
     normalize_dry_cooling_climate_inputs,
 )
-from impacts.thermoelectric.mapping import (
+from impacts.domain.thermoelectric.mapping import (
     CellMappingSummary,
     DEFAULT_COUNTRY_COLUMNS,
     DEFAULT_IMPUTED_DRY_MAPPING_COLUMNS,
@@ -47,7 +47,7 @@ from impacts.thermoelectric.mapping import (
     write_recovered_unit_cell_mapping,
     write_unit_cell_mapping,
 )
-from impacts.thermoelectric.wet import (
+from impacts.domain.thermoelectric.wet import (
     DEFAULT_ISIMIP_VARIABLE_NAMES,
     WET_COOLING_VARIABLES,
     REQUIRED_WET_COOLING_VARIABLES,

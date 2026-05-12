@@ -7,7 +7,7 @@ import pandas as pd
 import xarray as xr
 
 from impacts.kernel import evaluate_kernel
-from impacts.thermoelectric.dry import (
+from impacts.domain.thermoelectric.dry import (
     build_dry_cooling_mapping,
     create_dry_cooling_kernel,
     normalize_dry_cooling_climate_inputs,

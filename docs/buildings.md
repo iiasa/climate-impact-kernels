@@ -1,7 +1,7 @@
 # Buildings
 
-`impacts.buildings` currently centers on the CHILLED pathway implemented in
-`impacts.buildings.chilled`.
+`impacts.domain.buildings` currently centers on the CHILLED pathway implemented in
+`impacts.domain.buildings.chilled`.
 
 The buildings kernel uses the shared `ImpactKernel` contract from
 `impacts.kernel`, but the parameters, contracts, and validation rules are

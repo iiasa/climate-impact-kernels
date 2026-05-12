@@ -1,74 +1,80 @@
 # Architecture
 
-`impacts` has two layers:
+`impacts` is two layers. Dependencies point downward only.
 
-- **`impacts.core`** — reusable xarray-native mechanics: temporal/spatial
-  aggregation, unit normalization, warming-level matching and binning,
-  baseline anomalies, response-surface contracts, evaluation orchestration,
-  and region loading.
-- **Domain modules** — `impacts.thermoelectric`, `impacts.buildings`,
-  `impacts.isimip`, `impacts.kernel`. These own domain contracts, joins,
-  physics kernels, RIME-X adapters, and ISIMIP ingress.
+```
+        impacts/
+        ├── kernel.py            evaluation contract used by every domain
+        ├── isimip.py            concrete ISIMIP3b ingress
+        │
+        ├── domain/              ──┐  may import climatecore + kernel + isimip
+        │   ├── thermoelectric/    │
+        │   └── buildings/         │  must NOT be imported by climatecore
+        │                        ──┘
+        └── climatecore/         ──┐  pure xarray-native mechanics
+            ├── baseline.py        │  must NOT import from domain,
+            ├── evaluation.py      │  kernel, or isimip
+            ├── warming/           │
+            ├── transforms/        │
+            └── regions/         ──┘
+```
 
-Dependencies point downward only: domain → core. Core never imports from
-any domain module.
+- **`impacts.climatecore`** — reusable xarray-native mechanics organized
+  by concern: `baseline.py`, `evaluation.py`, `warming/` (warming-level
+  matching, response surfaces, canonical dataclasses), `transforms/`
+  (temporal, spatial, units, stats), and `regions/` (region loading and
+  entity-to-region aggregation).
+- **`impacts.domain`** — domain-specific contracts, mappings, physics
+  kernels, and RIME-X adapters under `thermoelectric/` and `buildings/`.
+- **`impacts.kernel`** — the shared evaluation contract every domain
+  kernel implements.
+- **`impacts.isimip`** — concrete ISIMIP3b file discovery and variable
+  loading.
 
-## The boundary contract
+## Boundary contract
 
-`impacts.core` must not import from `impacts.thermoelectric`,
-`impacts.buildings`, `impacts.isimip`, or `impacts.kernel`.
+`impacts.climatecore` must not import from `impacts.domain`,
+`impacts.kernel`, or `impacts.isimip`.
 
-This is enforced by `import-linter` (configured in `pyproject.toml` under
-`[tool.importlinter]`). Run `uv run lint-imports` locally and in CI.
+The contract is enforced by `import-linter` (`[tool.importlinter]` in
+`pyproject.toml`). Run `uv run lint-imports` locally and in CI.
 
-Contract violations are not negotiable. If a generic helper appears to need
-domain knowledge to function, the design is wrong — either generalize the
-helper to take the domain concept as an argument, or keep the
-domain-coupled version inside the domain module.
+Contract violations are not negotiable. If a generic-looking helper
+appears to need domain knowledge, generalize the signature; do not
+couple the core to a domain.
 
-## What belongs in core
+## What belongs in climatecore
 
-- Operations expressible in terms of `xarray.DataArray` / `xarray.Dataset`
-  inputs and outputs.
+- Operations expressible in terms of `xarray.DataArray` /
+  `xarray.Dataset` inputs and outputs.
 - Mechanics that recur or could plausibly recur across multiple domains.
-- Helpers whose contract is stable under the rule "if a non-`impacts`
-  consumer ever appears, this would still apply to them".
-- Anything dask-parallelizable in the hot path.
+- Helpers that remain coherent under the hypothetical "any future
+  non-`impacts` consumer".
+- Anything that needs to stay dask-parallelizable in the hot path.
 
-## What does not belong in core
+## What does not belong in climatecore
 
 - ISIMIP file discovery, scenario metadata, project-specific path
   conventions.
-- Domain physics — cooling equations, building energy kernels, crop yields.
+- Domain physics — cooling equations, building energy kernels, crop
+  yields.
 - Adapter orchestration for a single workflow.
 - Output schemas tied to one downstream consumer.
 
 When a step looks generic but turns out to need domain-specific knobs,
-default to keeping it in the domain module. Promotion to core happens only
-when a second use site emerges. Premature promotion is the failure mode
-this rule prevents.
-
-## History
-
-`impacts.core` was originally a standalone Python package
-(`climateresponse`) consumed by `impacts` via a `path =` dependency. It was
-folded in when it became clear that `impacts` was the only real consumer
-and the two repositories were co-evolving on essentially every feature.
-
-The boundary survived the fold-in as a code-enforced rule rather than a
-repo-enforced one. The standalone repo at `~/climateresponse` is archived
-at the pre-fold point.
+default to keeping it in the domain module. Promotion to climatecore
+happens only when a second use site emerges. Premature promotion is the
+failure mode this rule prevents.
 
 ## Extraction recovery
 
-If a second non-`impacts` consumer ever materializes and the core is large
-enough to justify separate hosting again, extraction is one
-`git filter-repo --subdirectory-filter impacts/core` plus the inverse
-operations on `tests/core/` and `docs/core/`. The boundary linter
-guarantees that no domain imports have leaked across, so the extracted
-package will build standalone without rewriting imports.
+If a non-`impacts` consumer ever materializes, extraction is a
+`git filter-repo --subdirectory-filter impacts/climatecore` plus the
+matching operations on `tests/climatecore/` and `docs/climatecore/`. The
+boundary linter guarantees no domain imports have leaked across, so the
+extracted package builds standalone without rewriting imports.
 
-Do not let this safety valve become a planning assumption. The cost of
+This is a safety valve, not a planning assumption. The cost of
 extraction grows with how much code lives on the wrong side of the
-boundary; the linter keeps that cost low, but only as long as it actually
-runs in CI.
+boundary; the linter keeps that cost low, but only as long as it
+actually runs in CI.

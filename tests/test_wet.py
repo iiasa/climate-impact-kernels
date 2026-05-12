@@ -7,7 +7,7 @@ import pandas as pd
 import xarray as xr
 
 from impacts.kernel import evaluate_kernel
-from impacts.thermoelectric.wet import (
+from impacts.domain.thermoelectric.wet import (
     WetCoolingAssumptions,
     build_wet_cooling_mapping,
     create_wet_cooling_kernel,

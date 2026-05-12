@@ -16,7 +16,7 @@ The RIME-X thermoelectric adapters then:
 
 1. Load the monthly country parquet into an xarray `ucr` field.
 2. Attach annual-mean GMT-derived `warming_level` coordinates via
-   `impacts.core`.
+   `impacts.climatecore`.
 3. Build monthly or seasonal quantile surfaces from the GWL-labelled array.
 
 The mapping and cooling artifacts are durable contracts. If their logic changes,

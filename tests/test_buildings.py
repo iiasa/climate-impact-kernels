@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from impacts.buildings.chilled import (
+from impacts.domain.buildings.chilled import (
     ChilledEnergyAssumptions,
     DEFAULT_ARCHETYPE_INPUT_PATH,
     build_chilled_archetype_mapping,

@@ -7,13 +7,13 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import xarray as xr
-from impacts.core import (
+from impacts.climatecore import (
     EvaluationResult,
     normalize_temperature,
 )
 from impacts.isimip import ISIMIPVariable
 from impacts.kernel import ImpactKernel, normalize_climate_inputs
-from impacts.thermoelectric._common import (
+from impacts.domain.thermoelectric._common import (
     join_country_from_cooling,
     validate_unique_units,
 )

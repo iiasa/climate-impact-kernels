@@ -33,12 +33,11 @@ include = ["impacts*"]
 root_packages = ["impacts"]
 
 [[tool.importlinter.contracts]]
-name = "impacts.core does not depend on impacts domain modules"
+name = "impacts.climatecore does not depend on impacts domain modules"
 type = "forbidden"
-source_modules = ["impacts.core"]
+source_modules = ["impacts.climatecore"]
 forbidden_modules = [
-    "impacts.thermoelectric",
-    "impacts.buildings",
+    "impacts.domain",
     "impacts.isimip",
     "impacts.kernel",
 ]

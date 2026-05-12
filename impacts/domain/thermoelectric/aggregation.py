@@ -6,7 +6,7 @@ from typing import Literal, TypeAlias
 
 import xarray as xr
 
-from impacts.core.regions import (
+from impacts.climatecore.regions import (
     aggregate_entity_dataset,
     message_r12_region_labels,
     resolve_region_labels,

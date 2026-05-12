@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from impacts.thermoelectric.mapping import (
+from impacts.domain.thermoelectric.mapping import (
     build_country_rollup,
     build_location_cell_mapping,
     build_unit_cell_mapping,

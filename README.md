@@ -1,92 +1,84 @@
-`impacts` is a library of domain-specific climate-impact contracts, mappings,
-and physics kernels, built on a shared xarray-native core.
+# impacts
 
-It is organized as `impacts.<domain>`, not as a pipeline CLI.
+A library of domain-specific climate-impact contracts, mappings, and
+physics kernels, built on a shared xarray-native core.
 
-Current layout:
+Organized as `impacts.<area>`, not as a pipeline CLI.
 
-- `impacts.core` — shared xarray-native mechanics (warming levels, temporal
-  and spatial aggregation, unit normalization, region loading, response
-  surfaces, evaluation orchestration)
-- `impacts.thermoelectric` — thermoelectric domain
-- `impacts.buildings` — buildings domain
-- `impacts.isimip` — ISIMIP3b ingress
-- `impacts.kernel` — kernel contract used by domain modules
+## Mental model
 
-## What belongs here
+```
+        ┌────────────────────────────────────────────────────────┐
+        │ impacts.domain         (thermoelectric, buildings)      │
+        │                                                         │
+        │   physics kernels • RIME-X adapters • mapping artifacts │
+        └─────────────┬──────────────────────────┬────────────────┘
+                      │ depends on               │ depends on
+                      ▼                          ▼
+        ┌──────────────────────┐    ┌──────────────────────────┐
+        │ impacts.kernel       │    │ impacts.isimip           │
+        │ evaluation contract  │    │ ISIMIP3b ingress         │
+        └──────────┬───────────┘    └──────────────────────────┘
+                   │ depends on
+                   ▼
+        ┌────────────────────────────────────────────────────────┐
+        │ impacts.climatecore    (xarray-native, dask-friendly)   │
+        │                                                         │
+        │   warming/ • transforms/ • regions/                     │
+        │   baseline.py • evaluation.py                           │
+        └────────────────────────────────────────────────────────┘
+```
 
-`impacts` owns:
-
-- domain contracts and validation
-- joins from climate inputs to domain entities
-- physics kernels and assumptions
-- domain-specific aggregation targets
-- checked-in artifacts that encode validated mappings
-- reusable xarray-native mechanics that recur across domains (inside
-  `impacts.core`)
-
-`impacts` does not own:
-
-- dataset discovery or catalog logic outside of `impacts.isimip`
-- project-specific workflow orchestration above the kernel contract
-- non-stationary GEV extremes (lives in `rimeX`)
-- output layouts tied to a single downstream consumer
+The arrow direction is the rule: everything above may depend on
+everything below it. The reverse is forbidden and enforced by
+`import-linter`. See [docs/architecture.md](docs/architecture.md) for
+the boundary contract and the extraction recovery path.
 
 ## Read this first
 
 - [docs/architecture.md](docs/architecture.md) — layered structure and
-  boundary contract between `impacts.core` and the domain modules
+  the `climatecore` ↓ `domain` boundary contract.
 - [docs/thermoelectric.md](docs/thermoelectric.md)
 - [docs/buildings.md](docs/buildings.md)
 - [docs/workflows.md](docs/workflows.md)
-- [docs/core/shared_core_design.md](docs/core/shared_core_design.md) and the
-  rest of [docs/core/](docs/core/) for the shared-core scope
+- [docs/climatecore/shared_core_design.md](docs/climatecore/shared_core_design.md)
+  for the core's scope.
 
 Then open the concrete modules you need:
 
-- `impacts/core/__init__.py`
-- `impacts/thermoelectric/__init__.py`
-- `impacts/buildings/chilled.py`
-- `impacts/thermoelectric/rimex.py`
-- `impacts/buildings/rimex.py`
+- `impacts/climatecore/__init__.py`
+- `impacts/domain/thermoelectric/__init__.py`
+- `impacts/domain/buildings/chilled.py`
+- `impacts/domain/thermoelectric/rimex.py`
+- `impacts/domain/buildings/rimex.py`
 - `impacts/kernel.py`
 - `impacts/isimip.py`
 
-## Boundary discipline
-
-`impacts.core` must not import from `impacts.thermoelectric`,
-`impacts.buildings`, `impacts.isimip`, or `impacts.kernel`. This is
-enforced by `import-linter` (`uv run lint-imports`) and is expected to run
-in CI. See [docs/architecture.md](docs/architecture.md) for the rationale
-and the extraction recovery path.
-
-If a generic-looking helper appears to need domain knowledge, generalize the
-signature; do not punch a hole in the contract.
-
 ## Package shape
 
-### `impacts.core`
+### `impacts.climatecore`
 
-Reusable xarray-native mechanics. Hot paths operate directly on
-`xarray.DataArray` / `xarray.Dataset` objects and remain dask-compatible.
-See [docs/core/shared_core_design.md](docs/core/shared_core_design.md) for
-the full scope and what is intentionally out of scope.
+Reusable xarray-native mechanics. Hot paths take `xarray.DataArray` or
+`xarray.Dataset` and return the same. Layout:
 
-### `impacts.thermoelectric`
+- `baseline.py`, `evaluation.py` at the top.
+- `warming/` — GMT running means, warming-level matching and binning,
+  response-surface interpolation, canonical dataclasses.
+- `transforms/` — temporal, spatial, unit, and statistical transforms.
+- `regions/` — region loading and entity-to-region aggregation against
+  `common-definitions`.
+
+See [docs/climatecore/](docs/climatecore/) for module-level docs.
+
+### `impacts.domain.thermoelectric`
 
 Thermo-electric plant mapping, cooling classification, wet/dry kernel
-construction, and regional aggregation.
+construction, regional aggregation, and the RIME-X adapter.
 
-Important modules:
+Modules: `mapping.py`, `cooling.py`, `wet.py`, `dry.py`,
+`aggregation.py`, `rimex.py`.
 
-- `mapping.py`
-- `cooling.py`
-- `wet.py`
-- `dry.py`
-- `aggregation.py`
-- `rimex.py`
-
-Important checked-in artifacts under `data/`:
+Checked-in artifacts under `data/`:
 
 - `unit_cell_mapping.parquet`
 - `recovered_unit_cell_mapping.parquet`
@@ -94,74 +86,60 @@ Important checked-in artifacts under `data/`:
 - `country_rollup.parquet`
 - `unit_cooling_mapping.parquet`
 
-### `impacts.buildings`
+### `impacts.domain.buildings`
 
-The `buildings` domain currently centers on
-`impacts.buildings.chilled`, which evaluates the CHILLED pathway
-through the shared `ImpactKernel` contract.
+The buildings domain centers on `impacts.domain.buildings.chilled`,
+which evaluates the CHILLED pathway through the shared `ImpactKernel`
+contract. The RIME-X adapter lives at
+`impacts.domain.buildings.rimex`.
 
-Important modules:
+### `impacts.kernel`
 
-- `buildings/chilled.py`
-- `buildings/rimex.py`
-- `kernel.py`
-- `isimip.py`
+Shared evaluation contract for domain kernels. Duration is part of
+evaluation, not a separate downstream convention.
+
+### `impacts.isimip`
+
+Concrete ISIMIP3b file discovery and variable loading from pdrive.
 
 ## Design constraints
 
-- The package stays domain-first. Reusable numerical transforms belong in
-  `impacts.core`, not duplicated inside each domain.
-- `kernel.py` is the shared evaluation contract for domain kernels.
-  Duration is part of evaluation, not a separate downstream convention.
+- The package stays domain-first. Reusable numerical transforms belong
+  in `impacts.climatecore`.
 - Thermoelectric outputs may be aggregated to countries or MESSAGE R12
-  regions, but MESSAGE regional semantics are not embedded in the mapping
-  artifacts.
-- The buildings CHILLED kernel targets the ALPS2025 archetype contract. Do
-  not silently coerce it back to older proxy schemas.
+  regions, but MESSAGE regional semantics are not embedded in the
+  mapping artifacts.
+- The CHILLED kernel targets the ALPS2025 archetype contract. Do not
+  silently coerce it back to older proxy schemas.
+
+## Development
+
+```sh
+uv sync                  # installs the project editable + dev group
+uv run pytest            # 101 tests
+uv run lint-imports      # boundary contract
+```
+
+Focused test subsets:
+
+- `tests/climatecore/{test_baseline,test_evaluation,test_warming,test_transforms,test_regions}.py`
+- `tests/test_{mapping,cooling,wet,dry,aggregation,isimip,buildings,recovery,rimex}.py`
 
 ## RIME-X adapters
 
-RIME-X preprocessing follows the layered structure directly:
-
-- `impacts.core` owns the generic xarray-first warming-level attachment and
-  quantile-surface builders
-- `impacts.thermoelectric.rimex` reshapes the thermoelectric country
-  parquet into an xarray UCR field and derives seasonal UCR
-- `impacts.buildings.rimex` aggregates CHILLED entity outputs to countries
-  and attaches filename-derived archetype metadata
+- `impacts.climatecore` owns the generic xarray-first warming-level
+  attachment and quantile-surface builders.
+- `impacts.domain.thermoelectric.rimex` reshapes the thermoelectric
+  country parquet into an xarray UCR field.
+- `impacts.domain.buildings.rimex` aggregates CHILLED entity outputs to
+  countries and attaches filename-derived archetype metadata.
 
 The durable artifact scripts under `scripts/` remain the I/O boundary.
 
 ## Provenance notes
 
-The thermoelectric artifacts are built from a preconstructed global fleet
-table with unit attributes, cooling assignments, and partial coordinate
-coverage. The package materializes contract artifacts from that source
-table; it does not reconstruct the fleet from raw registries in this
-repository.
-
-The conservative recovery path intentionally leaves much of the missing
-fleet unresolved rather than inferring locations heuristically.
-
-## Development
-
-Use `uv` for local execution.
-
-Install: `uv sync` (installs the project editable and the dev group with
-`pytest` and `import-linter`).
-
-Tests: `uv run pytest` or pick a focused subset:
-
-- `tests/core/test_core.py`
-- `tests/test_mapping.py`
-- `tests/test_cooling.py`
-- `tests/test_wet.py`
-- `tests/test_dry.py`
-- `tests/test_aggregation.py`
-- `tests/test_isimip.py`
-- `tests/test_buildings.py`
-- `tests/test_recovery.py`
-- `tests/test_rimex.py`
-
-Boundary check: `uv run lint-imports` (runs the `import-linter` contracts
-declared in `pyproject.toml`).
+The thermoelectric artifacts are built from a preconstructed global
+fleet table with unit attributes, cooling assignments, and partial
+coordinate coverage. The conservative recovery path intentionally
+leaves much of the missing fleet unresolved rather than inferring
+locations heuristically.

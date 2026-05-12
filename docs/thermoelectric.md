@@ -1,6 +1,6 @@
 # Thermoelectric
 
-`impacts.thermoelectric` owns the thermo-electric power workflows:
+`impacts.domain.thermoelectric` owns the thermo-electric power workflows:
 
 - unit-to-grid mapping
 - cooling classification

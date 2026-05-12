@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from impacts.thermoelectric.mapping import (
+from impacts.domain.thermoelectric.mapping import (
     build_imputed_dry_unit_cell_mapping,
     build_imputed_wet_unit_cell_mapping,
     build_recovered_unit_cell_mapping,

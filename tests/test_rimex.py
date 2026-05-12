@@ -8,13 +8,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from impacts.buildings.rimex import (
+from impacts.domain.buildings.rimex import (
     aggregate_chilled_to_country,
     expand_chilled_metadata,
     load_country_raster,
     parse_chilled_matrix_filename,
 )
-from impacts.thermoelectric.rimex import (
+from impacts.domain.thermoelectric.rimex import (
     aggregate_thermoelectric_seasonal,
     load_thermoelectric_ucr,
 )

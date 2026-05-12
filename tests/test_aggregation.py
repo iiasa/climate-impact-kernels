@@ -5,7 +5,7 @@ import unittest
 
 import xarray as xr
 
-from impacts.thermoelectric.aggregation import (
+from impacts.domain.thermoelectric.aggregation import (
     aggregate_thermoelectric_file,
     aggregate_thermoelectric_regions,
     write_aggregated_thermoelectric_file,

@@ -15,7 +15,7 @@ from typing import Literal, TypeAlias
 
 import pandas as pd
 import xarray as xr
-from impacts.core import (
+from impacts.climatecore import (
     EvaluationResult,
     aggregate_monthly,
     aggregate_seasonal,
@@ -53,7 +53,7 @@ def normalize_climate_inputs(
     """Select, rename, and unit-normalize climate variables.
 
     Each normalization spec is (internal_name, target_unit, normalize_fn) where
-    normalize_fn has the signature of ``impacts.core.normalize_temperature``.
+    normalize_fn has the signature of ``impacts.climatecore.normalize_temperature``.
     """
 
     variables = dict(default_variable_names)

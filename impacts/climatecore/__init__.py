@@ -1,8 +1,8 @@
-"""Shared computational core for climate-response workflows."""
+"""Shared computational core for the impacts package."""
 
 from .baseline import compute_anomaly
 from .evaluation import EvaluationResult, evaluate_gridded_dataset, evaluate_mapped_dataset
-from .contracts import (
+from .warming.contracts import (
     GMTPoint,
     GMTSeries,
     GridQuantileResponseSurface,
@@ -11,23 +11,9 @@ from .contracts import (
     WarmingLevelMatch,
     YearLevelBin,
 )
-from .gmt import compute_running_mean
-from .response import interpolate_along_warming_level
-from .spatial import (
-    aggregate_by_region,
-    attach_gridded_dataarray,
-    attach_gridded_dataset,
-    grid_cell_area,
-    weighted_average,
-)
-from .stats import deterministic_resampling, weighted_quantiles
-from .temporal import (
-    CLIMATOLOGICAL_SEASONS,
-    aggregate_annual,
-    aggregate_monthly,
-    aggregate_seasonal,
-)
-from .warming_levels import (
+from .warming.gmt import compute_running_mean
+from .warming.response import interpolate_along_warming_level
+from .warming.warming_levels import (
     assign_years_to_levels,
     attach_warming_levels,
     bin_by_warming_level,
@@ -35,7 +21,21 @@ from .warming_levels import (
     build_warming_level_quantile_surface,
     match_warming_levels,
 )
-from .units import normalize_pressure, normalize_temperature, resolve_unit
+from .transforms.spatial import (
+    aggregate_by_region,
+    attach_gridded_dataarray,
+    attach_gridded_dataset,
+    grid_cell_area,
+    weighted_average,
+)
+from .transforms.stats import deterministic_resampling, weighted_quantiles
+from .transforms.temporal import (
+    CLIMATOLOGICAL_SEASONS,
+    aggregate_annual,
+    aggregate_monthly,
+    aggregate_seasonal,
+)
+from .transforms.units import normalize_pressure, normalize_temperature, resolve_unit
 
 __all__ = [
     "CLIMATOLOGICAL_SEASONS",
