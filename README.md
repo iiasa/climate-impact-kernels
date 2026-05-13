@@ -24,8 +24,8 @@ Organized as `impacts.<area>`, not as a pipeline CLI.
         ┌────────────────────────────────────────────────────────┐
         │ impacts.climatecore    (xarray-native, dask-friendly)   │
         │                                                         │
-        │   warming/ • transforms/ • regions/                     │
-        │   baseline.py • evaluation.py                           │
+        │   baseline.py • evaluation.py • warming.py              │
+        │   regions.py • transforms/                              │
         └────────────────────────────────────────────────────────┘
 ```
 
@@ -38,11 +38,11 @@ the boundary contract and the extraction recovery path.
 
 - [docs/architecture.md](docs/architecture.md) — layered structure and
   the `climatecore` ↓ `domain` boundary contract.
+- [docs/climatecore.md](docs/climatecore.md) — the shared core's
+  layout, entry points, and contracts.
 - [docs/thermoelectric.md](docs/thermoelectric.md)
 - [docs/buildings.md](docs/buildings.md)
 - [docs/workflows.md](docs/workflows.md)
-- [docs/climatecore/shared_core_design.md](docs/climatecore/shared_core_design.md)
-  for the core's scope.
 
 Then open the concrete modules you need:
 
@@ -62,13 +62,13 @@ Reusable xarray-native mechanics. Hot paths take `xarray.DataArray` or
 `xarray.Dataset` and return the same. Layout:
 
 - `baseline.py`, `evaluation.py` at the top.
-- `warming/` — GMT running means, warming-level matching and binning,
-  response-surface interpolation, canonical dataclasses.
+- `warming.py` — GMT running means, warming-level matching and
+  binning, response-surface interpolation, canonical dataclasses.
+- `regions.py` — region loading and entity-to-region aggregation
+  against `common-definitions`.
 - `transforms/` — temporal, spatial, unit, and statistical transforms.
-- `regions/` — region loading and entity-to-region aggregation against
-  `common-definitions`.
 
-See [docs/climatecore/](docs/climatecore/) for module-level docs.
+See [docs/climatecore.md](docs/climatecore.md) for module-level docs.
 
 ### `impacts.domain.thermoelectric`
 
