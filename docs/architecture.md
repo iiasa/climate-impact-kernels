@@ -14,16 +14,16 @@
         └── climatecore/         ──┐  pure xarray-native mechanics
             ├── baseline.py        │  must NOT import from domain,
             ├── evaluation.py      │  kernel, or isimip
-            ├── warming/           │
-            ├── transforms/        │
-            └── regions/         ──┘
+            ├── warming.py         │
+            ├── regions.py         │
+            └── transforms/      ──┘
 ```
 
 - **`impacts.climatecore`** — reusable xarray-native mechanics organized
-  by concern: `baseline.py`, `evaluation.py`, `warming/` (warming-level
-  matching, response surfaces, canonical dataclasses), `transforms/`
-  (temporal, spatial, units, stats), and `regions/` (region loading and
-  entity-to-region aggregation).
+  by concern: `baseline.py`, `evaluation.py`, `warming.py` (warming-level
+  matching, response surfaces, canonical dataclasses), `regions.py`
+  (region loading and entity-to-region aggregation), and `transforms/`
+  (temporal, spatial, units, stats).
 - **`impacts.domain`** — domain-specific contracts, mappings, physics
   kernels, and RIME-X adapters under `thermoelectric/` and `buildings/`.
 - **`impacts.kernel`** — the shared evaluation contract every domain

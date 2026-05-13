@@ -2,7 +2,7 @@
 
 from .baseline import compute_anomaly
 from .evaluation import EvaluationResult, evaluate_gridded_dataset, evaluate_mapped_dataset
-from .warming.contracts import (
+from .warming import (
     GMTPoint,
     GMTSeries,
     GridQuantileResponseSurface,
@@ -10,15 +10,13 @@ from .warming.contracts import (
     RegionResponseSurface,
     WarmingLevelMatch,
     YearLevelBin,
-)
-from .warming.gmt import compute_running_mean
-from .warming.response import interpolate_along_warming_level
-from .warming.warming_levels import (
     assign_years_to_levels,
     attach_warming_levels,
     bin_by_warming_level,
     build_warming_level_assignments,
     build_warming_level_quantile_surface,
+    compute_running_mean,
+    interpolate_along_warming_level,
     match_warming_levels,
 )
 from .transforms.spatial import (

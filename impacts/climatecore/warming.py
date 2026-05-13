@@ -1,6 +1,14 @@
+"""Warming-level matching, response surfaces, and shared dataclasses.
+
+Replaces the former `impacts.climatecore.warming` package. The import
+surface is unchanged: `from impacts.climatecore.warming import ...`
+still resolves to the same public names.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TypeAlias
 
 import numpy as np
@@ -10,6 +18,166 @@ ArrayLike: TypeAlias = xr.DataArray | xr.Dataset
 
 DEFAULT_QUANTILES = (0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95)
 TARGET_LEVEL_DIM = "target_warming_level"
+
+
+# --- Contracts ---------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class GMTPoint:
+    """Single year of global-mean-temperature anomaly."""
+
+    year: int
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
+class GMTSeries:
+    """Canonical GMT contract shared across workflows."""
+
+    model: str
+    scenario: str
+    baseline_start_year: int | None
+    baseline_end_year: int | None
+    values: tuple[GMTPoint, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WarmingLevelMatch:
+    """Nearest-year match for a target warming level."""
+
+    level: float
+    year: int
+    actual_warming: float
+    absolute_error: float
+    warming_rate: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class YearLevelBin:
+    """Assignment from a simulation year to a target warming level."""
+
+    year: int
+    level: float
+    actual_warming: float
+
+
+@dataclass(frozen=True, slots=True)
+class RegionLevelValue:
+    """Region-aggregated response value at a warming level."""
+
+    region: str
+    level: float
+    value: float
+    scenario: str | None = None
+    year: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RegionResponseSurface:
+    """Canonical contract for region-aggregated response surfaces."""
+
+    variable: str
+    values: xr.DataArray
+
+    def __post_init__(self) -> None:
+        required_dims = {"region", "warming_level"}
+        if not required_dims.issubset(self.values.dims):
+            raise ValueError(
+                f"region response surface must include dims {sorted(required_dims)}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class GridQuantileResponseSurface:
+    """Canonical contract for gridded quantile response surfaces."""
+
+    variable: str
+    values: xr.DataArray
+
+    def __post_init__(self) -> None:
+        required_dims = {"warming_level", "quantile", "lat", "lon"}
+        if not required_dims.issubset(self.values.dims):
+            raise ValueError(
+                f"grid quantile response surface must include dims {sorted(required_dims)}"
+            )
+
+
+# --- GMT-axis transforms -----------------------------------------------
+
+
+def compute_running_mean(
+    data: ArrayLike,
+    window: int,
+    dim: str = "year",
+    min_periods: int | None = None,
+    center: bool = True,
+) -> ArrayLike:
+    """Return a rolling mean along dim."""
+
+    if window < 1:
+        raise ValueError("window must be a positive integer")
+
+    return data.rolling({dim: window}, center=center, min_periods=min_periods or window).mean()
+
+
+# --- Response-surface interpolation ------------------------------------
+
+
+def interpolate_along_warming_level(
+    values: ArrayLike,
+    target_levels: float | Sequence[float],
+    dim: str = "warming_level",
+) -> ArrayLike:
+    """Linearly interpolate along the warming-level axis."""
+
+    if dim not in values.dims:
+        raise ValueError(f"{dim!r} is not a dimension of the input data")
+
+    requested = np.atleast_1d(np.asarray(target_levels, dtype=float))
+    available = np.asarray(values[dim].values, dtype=float)
+    if requested.min() < available.min() or requested.max() > available.max():
+        raise ValueError("target_levels lie outside the available warming-level range")
+
+    interpolated = _interp_arraylike(values=values, target_levels=requested, dim=dim)
+    if np.isscalar(target_levels):
+        return interpolated.squeeze(dim=dim, drop=True)
+    return interpolated
+
+
+def _interp_arraylike(values: ArrayLike, target_levels: np.ndarray, dim: str) -> ArrayLike:
+    match values:
+        case xr.DataArray():
+            return _interp_dataarray(values=values, target_levels=target_levels, dim=dim)
+        case xr.Dataset():
+            return values.map(
+                lambda array: _interp_dataarray(values=array, target_levels=target_levels, dim=dim)
+            )
+        case _:
+            raise TypeError("values must be an xarray DataArray or Dataset")
+
+
+def _interp_dataarray(values: xr.DataArray, target_levels: np.ndarray, dim: str) -> xr.DataArray:
+    source_levels = np.asarray(values[dim].values, dtype=float)
+    other_dims = [name for name in values.dims if name != dim]
+    transposed = values.transpose(dim, *other_dims)
+    target_dim = "__target_warming_level"
+
+    interpolated = xr.apply_ufunc(
+        lambda array: np.interp(target_levels, source_levels, array),
+        transposed,
+        input_core_dims=[[dim]],
+        output_core_dims=[[target_dim]],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[values.dtype],
+        dask_gufunc_kwargs={"output_sizes": {target_dim: target_levels.size}},
+    )
+    interpolated = interpolated.rename({target_dim: dim}).assign_coords({dim: target_levels})
+    return interpolated.transpose(*values.dims)
+
+
+# --- Warming-level matching and assignment -----------------------------
 
 
 def match_warming_levels(
@@ -301,6 +469,9 @@ def build_warming_level_quantile_surface(
             }
         )
     )
+
+
+# --- Private helpers ---------------------------------------------------
 
 
 def _assignment_path_dims(assignments: xr.Dataset, *, year_dim: str) -> tuple[str, ...]:

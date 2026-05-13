@@ -1,6 +1,6 @@
 # Warming levels
 
-`impacts.climatecore.warming.warming_levels` provides the reusable
+`impacts.climatecore.warming` provides the reusable
 warming-level mechanics that move between annual GMT paths and
 warming-level-indexed response data.
 

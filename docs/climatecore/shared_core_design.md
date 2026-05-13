@@ -36,14 +36,14 @@ Consumers load and validate their own data, then hand explicit
 |---|---|
 | `climatecore/baseline.py` | Anomaly computation against a baseline window. |
 | `climatecore/evaluation.py` | Mapped and gridded kernel-evaluation orchestration. |
-| `climatecore/warming/` | GMT running means, warming-level matching/binning, response-surface interpolation, canonical dataclasses. |
+| `climatecore/warming.py` | GMT running means, warming-level matching/binning, response-surface interpolation, canonical dataclasses. |
 | `climatecore/transforms/` | Temporal, spatial, unit, and statistical transforms. |
-| `climatecore/regions/` | Region loading and entity-to-region aggregation. |
+| `climatecore/regions.py` | Region loading and entity-to-region aggregation. |
 
 ## Canonical contracts
 
-The contracts in `climatecore.warming.contracts` are intentionally
-small and explicit:
+The contracts in `climatecore.warming` are intentionally small and
+explicit:
 
 - `GMTSeries` carries `(model, scenario, baseline_start_year,
   baseline_end_year, values)`.
