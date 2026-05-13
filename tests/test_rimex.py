@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from impacts.domain.buildings.country import load_country_raster
 from impacts.domain.buildings.rimex import (
     aggregate_chilled_to_country,
     expand_chilled_metadata,
-    load_country_raster,
     parse_chilled_matrix_filename,
 )
 from impacts.domain.thermoelectric.rimex import (

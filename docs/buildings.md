@@ -9,6 +9,8 @@ about, tested, and re-used independently of the operational I/O scaffolding:
 | `impacts.domain.buildings.chilled` | Kernel contract: physics, climate-input normalizer, `ChilledEnergyAssumptions`, `create_chilled_kernel`. |
 | `impacts.domain.buildings.chilled_io` | File I/O: archetype/parametric/solar/region loaders, validators, gridded-parameter and archetype-mapping builders. |
 | `impacts.domain.buildings.chilled_config` | Operational path defaults. The only file in `impacts.domain.buildings` that reads from `os.environ`. |
+| `impacts.domain.buildings.country` | Country-label raster + generic area-weighted entity→country reduction. Reusable by any gridded buildings analysis that needs country aggregation. |
+| `impacts.domain.buildings.rimex` | CHILLED → RIME-X shape adapter: matrix-filename parsing, CHILLED-specific reduction map, metadata expansion. Composes the `country` primitives. |
 
 The kernel itself never touches the filesystem. Callers compose it with
 `impacts.kernel.evaluate_kernel` (mapped DataFrame inputs) or

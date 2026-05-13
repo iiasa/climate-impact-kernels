@@ -34,9 +34,9 @@ from impacts.climatecore import (  # noqa: E402
     grid_cell_area,
 )
 
+from impacts.domain.buildings.country import load_country_raster  # noqa: E402
 from impacts.domain.buildings.rimex import (  # noqa: E402
     CHILLED_VARIABLE_REDUCTIONS,
-    load_country_raster,
     parse_chilled_matrix_filename,
 )
 from impacts.isimip import load_isimip_gmt  # noqa: E402
