@@ -8,13 +8,14 @@ import xarray as xr
 
 from impacts.domain.buildings.chilled import (
     ChilledEnergyAssumptions,
-    DEFAULT_ARCHETYPE_INPUT_PATH,
-    build_chilled_archetype_mapping,
     create_chilled_kernel,
+    normalize_chilled_climate_inputs,
+)
+from impacts.domain.buildings.chilled_config import DEFAULT_ARCHETYPE_INPUT_PATH
+from impacts.domain.buildings.chilled_io import (
+    build_chilled_archetype_mapping,
     load_message_ix_buildings_archetypes,
     load_message_ix_buildings_parametric_runs,
-    normalize_chilled_climate_inputs,
-    run_chilled_archetype_ei,
 )
 from impacts.kernel import evaluate_kernel
 
@@ -168,7 +169,7 @@ class BuildingsChilledContractTest(unittest.TestCase):
         self.assertEqual(assumptions.ac_cop, 3.2)
         self.assertEqual(assumptions.heating_efficiency, 0.9)
 
-    def test_run_chilled_archetype_ei_uses_impact_kernel_contract(self) -> None:
+    def test_chilled_kernel_evaluation_runs_daily_and_monthly(self) -> None:
         assumptions = ChilledEnergyAssumptions(
             cooling_setpoint_c=26.0,
             cooling_max_c=28.0,
@@ -181,7 +182,8 @@ class BuildingsChilledContractTest(unittest.TestCase):
         )
 
         mapping = build_chilled_archetype_mapping(self.spatial_units, self.archetypes, self.solar)
-        daily = evaluate_kernel(create_chilled_kernel(assumptions), mapping, self.climate, duration="daily")
+        kernel = create_chilled_kernel(assumptions)
+        daily = evaluate_kernel(kernel, mapping, self.climate, duration="daily")
 
         self.assertEqual(daily["cooling_energy_total"].dims, ("time", "entity"))
         self.assertEqual(daily.sizes["time"], 4)
@@ -189,17 +191,7 @@ class BuildingsChilledContractTest(unittest.TestCase):
         self.assertEqual(daily.coords["spatial_unit_id"].values.tolist(), [0, 1])
         self.assertIn("climate_contract", daily.attrs)
 
-        direct = run_chilled_archetype_ei(
-            self.spatial_units,
-            self.climate,
-            self.archetypes,
-            self.solar,
-            assumptions=assumptions,
-            duration="daily",
-        )
-        xr.testing.assert_identical(daily, direct)
-
-        monthly = evaluate_kernel(create_chilled_kernel(assumptions), mapping, self.climate, duration="monthly")
+        monthly = evaluate_kernel(kernel, mapping, self.climate, duration="monthly")
         self.assertIn("time", monthly.dims)
 
 

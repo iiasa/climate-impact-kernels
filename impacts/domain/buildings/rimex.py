@@ -9,7 +9,7 @@ import xarray as xr
 from impacts.climatecore import attach_gridded_dataset, grid_cell_area
 from impacts.climatecore.regions import aggregate_entity_dataset
 
-from impacts.domain.buildings.chilled import DEFAULT_GAUL_CSV_PATH, DEFAULT_GAUL_RASTER_PATH
+from impacts.domain.buildings.chilled_config import DEFAULT_GAUL_CSV_PATH, DEFAULT_GAUL_RASTER_PATH
 
 CHILLED_VARIABLE_REDUCTIONS = {
     "cooling_energy_total": "sum",

@@ -1,70 +1,36 @@
+"""CHILLED building-cooling kernel.
+
+Owns only the kernel contract: the energy-intensity physics, the climate-input
+normalizer, the assumptions dataclass, and the kernel factory. File I/O,
+validators, and grid/mapping builders live in
+``impacts.domain.buildings.chilled_io``; path defaults live in
+``impacts.domain.buildings.chilled_config``.
+
+Callers compose the kernel with ``impacts.kernel.evaluate_kernel`` (mapped
+DataFrame inputs) or ``impacts.kernel.evaluate_gridded_kernel`` (gridded
+parameter Dataset inputs); both reach the same physics.
+"""
+
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-import yaml
 from impacts.climatecore import EvaluationResult, normalize_temperature
-from impacts.climatecore.transforms.spatial import attach_gridded_dataset
 
-from impacts.kernel import (
-    Duration,
-    ImpactKernel,
-    evaluate_gridded_kernel,
-    evaluate_kernel,
-    normalize_climate_inputs,
-)
+from impacts.kernel import ImpactKernel, normalize_climate_inputs
 
 DEFAULT_CHILLED_VARIABLE_NAMES = {
     "air_temperature_c": "tas",
 }
 
 REQUIRED_CHILLED_CLIMATE_VARIABLES = frozenset({"air_temperature_c"})
-REQUIRED_SPATIAL_UNIT_COLUMNS = frozenset({"grid_lat", "grid_lon", "region"})
-REQUIRED_ARCHETYPE_COLUMNS = frozenset(
-    {
-        "name",
-        "building_type",
-        "urt",
-        "arch",
-        "region",
-        "area_env",
-        "gl_perc",
-        "vol",
-        "u_val",
-        "ach_cl",
-        "ach_op",
-        "gn_int",
-        "gl_g",
-        "gl_sh",
-        "roof_area",
-        "roof_abs",
-        "u_roof",
-    }
-)
-REQUIRED_PARAMETRIC_COLUMNS = frozenset(
-    {
-        "id_run",
-        "name_run",
-        "cop",
-        "eff",
-        "t_sp_c",
-        "t_sp_c_max",
-        "t_sp_h",
-        "f_c",
-        "f_f",
-        "f_h",
-    }
-)
-ALPS2025_BUILDING_TYPES = frozenset({"sfh", "mfh"})
-ALPS2025_URT_VALUES = frozenset({"rur", "urb"})
-ALPS2025_ARCH_VALUES = frozenset({"s1", "s2", "s3", "s51", "s52"})
+
+MONTHS = tuple(range(1, 13))
 ARCHETYPE_PARAMETER_COLUMNS = (
     "area_env",
     "gl_perc",
@@ -79,9 +45,6 @@ ARCHETYPE_PARAMETER_COLUMNS = (
     "roof_abs",
     "u_roof",
 )
-MONTHS = tuple(range(1, 13))
-_KERNEL_ENTITY_CHUNK = 10000
-_KERNEL_TIME_CHUNK = 365
 SOLAR_VERTICAL_COLUMNS = tuple(f"solar_vertical_m{month:02d}" for month in MONTHS)
 SOLAR_HORIZONTAL_COLUMNS = tuple(f"solar_horizontal_m{month:02d}" for month in MONTHS)
 SOLAR_COLUMNS = SOLAR_VERTICAL_COLUMNS + SOLAR_HORIZONTAL_COLUMNS
@@ -96,28 +59,16 @@ CHILLED_METADATA_COLUMNS = (
     *SOLAR_COLUMNS,
 )
 
-WATXENE_PATH = Path(os.environ.get("WATXENE_PATH", "/mnt/p/watxene"))
-ALPS_DATA_PATH = WATXENE_PATH / "ISIMIP_postprocessed" / "data_for_vignesh" / "ALPS_2024"
-
-DEFAULT_ARCHETYPE_INPUT_PATH = Path(
-    os.environ.get(
-        "CHILLED_ARCHETYPE_PATH",
-        str(Path.home() / "message-ix-buildings/message_ix_buildings/data/chilled/version/ALPS2025/arch_input_reg.csv"),
-    )
-)
-DEFAULT_PARAMETRIC_INPUT_PATH = Path(
-    os.environ.get("CHILLED_PARAMETRIC_PATH", "")
-) if os.environ.get("CHILLED_PARAMETRIC_PATH") else None
-DEFAULT_R12_YAML_PATH = Path(
-    os.environ.get(
-        "MESSAGE_R12_YAML_PATH",
-        str(Path.home() / "message-ix-models/message_ix_models/data/node/R12.yaml"),
-    )
-)
-DEFAULT_GAUL_RASTER_PATH = ALPS_DATA_PATH / "gaul_lvl0_hybrid_05_3.nc"
-DEFAULT_GAUL_CSV_PATH = ALPS_DATA_PATH / "GAUL_lvl0_raster0.5.csv"
-DEFAULT_SOLAR_VERTICAL_PATH = ALPS_DATA_PATH / "EWEMBI_vert_irrad_1980-2009_avg.nc"
-DEFAULT_SOLAR_HORIZONTAL_PATH = ALPS_DATA_PATH / "EWEMBI_horiz_irrad_1980-2009_avg.nc"
+# Air density × specific heat / seconds-per-hour for the ventilation
+# coefficient `h_v = ρ·c_p·V·ach / 3600`. 1200 J/(m³·K) covers ρ·c_p for air
+# at typical indoor conditions.
+_AIR_VOLUMETRIC_HEAT_CAPACITY = 1200.0
+# Roof absorptance vs vertical-aperture solar gain weighting in the
+# CHILLED archetype model.
+_ROOF_HORIZONTAL_WEIGHT = 0.04
+# Seconds per day, divided by MJ-per-Joule, for converting instantaneous
+# power (W = J/s) into a daily energy total in MJ.
+_DAILY_POWER_TO_MJ = 86_400.0 / 1e6
 
 
 @dataclass(frozen=True)
@@ -149,20 +100,6 @@ class ChilledEnergyAssumptions:
             heating_efficiency=float(values["eff"]),
         )
 
-    def as_kernel_params(self) -> dict[str, float]:
-        return {
-            "cooling_setpoint_c": self.cooling_setpoint_c,
-            "cooling_max_c": self.cooling_max_c,
-            "heating_setpoint_c": self.heating_setpoint_c,
-            "cooling_hours_fraction": self.cooling_hours_fraction,
-            "fan_hours_fraction": self.fan_hours_fraction,
-            "heating_hours_fraction": self.heating_hours_fraction,
-            "ac_cop": self.ac_cop,
-            "heating_efficiency": self.heating_efficiency,
-            "fan_power_w": self.fan_power_w,
-            "area_per_fan_m2": self.area_per_fan_m2,
-        }
-
 
 CHILLED_NORMALIZATIONS = (
     ("air_temperature_c", "C", normalize_temperature),
@@ -186,325 +123,30 @@ def normalize_chilled_climate_inputs(
     )
 
 
-def load_message_ix_buildings_archetypes(path: Path | str = DEFAULT_ARCHETYPE_INPUT_PATH) -> pd.DataFrame:
-    """Load and validate the regional CHILLED archetype table."""
-
-    frame = pd.read_csv(path)
-    return validate_archetype_table(frame)
-
-
-def load_message_ix_buildings_parametric_runs(path: Path | str = DEFAULT_PARAMETRIC_INPUT_PATH) -> pd.DataFrame:
-    """Load and validate the CHILLED parametric-run table."""
-
-    if path is None:
-        raise FileNotFoundError(
-            "ALPS2025-only CHILLED support does not infer a parametric-run table; "
-            "pass CHILLED_PARAMETRIC_PATH explicitly when upstream orchestration provides one"
-        )
-
-    frame = pd.read_csv(path)
-    missing = REQUIRED_PARAMETRIC_COLUMNS.difference(frame.columns)
-    if missing:
-        missing_list = ", ".join(sorted(missing))
-        raise ValueError(f"parametric run table missing required columns: {missing_list}")
-    return frame.copy()
-
-
-def validate_archetype_table(frame: pd.DataFrame) -> pd.DataFrame:
-    """Validate the ALPS2025 archetype table contract."""
-
-    missing = REQUIRED_ARCHETYPE_COLUMNS.difference(frame.columns)
-    if missing:
-        raise ValueError(f"archetype table missing required columns: {', '.join(sorted(missing))}")
-
-    validated = frame.copy()
-
-    invalid_building_types = set(validated["building_type"].dropna()) - ALPS2025_BUILDING_TYPES
-    if invalid_building_types:
-        raise ValueError(
-            "archetype table has unsupported building_type values: "
-            f"{', '.join(sorted(map(str, invalid_building_types)))}"
-        )
-
-    invalid_urt = set(validated["urt"].dropna()) - ALPS2025_URT_VALUES
-    if invalid_urt:
-        raise ValueError(
-            f"archetype table has unsupported urt values: {', '.join(sorted(map(str, invalid_urt)))}"
-        )
-
-    invalid_arch = set(validated["arch"].dropna()) - ALPS2025_ARCH_VALUES
-    if invalid_arch:
-        raise ValueError(
-            f"archetype table has unsupported arch values: {', '.join(sorted(map(str, invalid_arch)))}"
-        )
-
-    duplicate_mask = validated.duplicated(["region", "building_type", "urt", "arch"], keep=False)
-    if duplicate_mask.any():
-        duplicates = (
-            validated.loc[duplicate_mask, ["region", "building_type", "urt", "arch"]]
-            .drop_duplicates()
-            .sort_values(["region", "building_type", "urt", "arch"])
-        )
-        raise ValueError(
-            "archetype table must be unique on (region, building_type, urt, arch); duplicates found for "
-            f"{duplicates.to_dict(orient='records')}"
-        )
-
-    return validated
-
-
-def normalize_chilled_solar_climatology(
-    dataset: xr.Dataset,
-    *,
-    vertical_name: str = "solar_vertical",
-    horizontal_name: str = "solar_horizontal",
-) -> xr.Dataset:
-    """Normalize the fixed monthly solar climatology into the production contract."""
-
-    missing = [name for name in (vertical_name, horizontal_name) if name not in dataset.data_vars]
-    if missing:
-        missing_list = ", ".join(sorted(missing))
-        raise ValueError(f"solar climatology missing required variables: {missing_list}")
-    if "month" not in dataset.coords:
-        raise ValueError("solar climatology must define a month coordinate")
-    if set(dataset["month"].values.tolist()) != set(MONTHS):
-        raise ValueError("solar climatology month coordinate must contain 1..12")
-
-    normalized = dataset[[vertical_name, horizontal_name]].rename(
-        {
-            vertical_name: "solar_vertical",
-            horizontal_name: "solar_horizontal",
-        }
-    )
-    if "lat" not in normalized.coords or "lon" not in normalized.coords:
-        raise ValueError("solar climatology must provide lat/lon coordinates")
-    return normalized.sortby("month")
-
-
-def load_ewembi_solar_climatology(
-    *,
-    vertical_path: Path | str = DEFAULT_SOLAR_VERTICAL_PATH,
-    horizontal_path: Path | str = DEFAULT_SOLAR_HORIZONTAL_PATH,
-) -> xr.Dataset:
-    """Load EWEMBI solar irradiance climatologies into the production contract.
-
-    Normalizes dimension order to (month, lat, lon), lat to ascending (S→N),
-    and dtype to float64. Both files use variable name 'irrad'.
-    """
-
-    vert_raw = xr.open_dataset(vertical_path)
-    horiz_raw = xr.open_dataset(horizontal_path)
-
-    vert = vert_raw["irrad"].transpose("month", "lat", "lon").sortby("lat").astype(np.float64)
-    horiz = horiz_raw["irrad"].transpose("month", "lat", "lon").sortby("lat").astype(np.float64)
-
-    return xr.Dataset(
-        data_vars={
-            "solar_vertical": vert,
-            "solar_horizontal": horiz,
-        },
-    )
-
-
-def load_r12_region_raster(
-    *,
-    gaul_raster_path: Path | str = DEFAULT_GAUL_RASTER_PATH,
-    gaul_csv_path: Path | str = DEFAULT_GAUL_CSV_PATH,
-    r12_yaml_path: Path | str = DEFAULT_R12_YAML_PATH,
-) -> xr.DataArray:
-    """Build an R12 region raster from the GAUL country raster and MESSAGE R12 node definitions."""
-
-    with open(r12_yaml_path) as fh:
-        r12_spec = yaml.safe_load(fh)
-
-    iso_to_r12: dict[str, str] = {}
-    for node_id, definition in r12_spec.items():
-        if node_id == "World" or "child" not in definition:
-            continue
-        region = node_id.removeprefix("R12_")
-        for iso3 in definition["child"]:
-            iso_to_r12[iso3] = region
-
-    gaul_csv = pd.read_csv(gaul_csv_path)
-    gaul_to_r12: dict[int, str] = {}
-    for _, row in gaul_csv.iterrows():
-        iso3 = str(row["ISO3"])
-        raster_id = int(row["ID"])
-        if iso3 in iso_to_r12:
-            gaul_to_r12[raster_id] = iso_to_r12[iso3]
-
-    gaul_raster = xr.open_dataarray(gaul_raster_path).sortby("lat")
-    gaul_values = gaul_raster.values
-    region_array = np.full(gaul_values.shape, "", dtype="U8")
-    for raster_id, region in gaul_to_r12.items():
-        region_array[gaul_values == raster_id] = region
-
-    return xr.DataArray(
-        region_array,
-        dims=gaul_raster.dims,
-        coords=gaul_raster.coords,
-        name="region",
-    )
-
-
-def build_chilled_parameter_grids(
-    region_raster: xr.DataArray,
-    archetypes: pd.DataFrame,
-    solar: xr.Dataset,
-    *,
-    building_type: str,
-    urt: str,
-    vintage: str,
-) -> xr.Dataset:
-    """Build gridded archetype parameters for one ALPS2025 source-table combination.
-
-    Maps region_raster values to archetype parameter values for the selected
-    building_type × urt × arch rows exactly as provided by the ALPS2025 table,
-    and flattens monthly solar into 24 per-cell columns matching the
-    kernel's _monthly_static_array contract.
-    """
-
-    row = archetypes.loc[
-        (archetypes["building_type"] == building_type)
-        & (archetypes["urt"] == urt)
-        & (archetypes["arch"] == vintage)
-    ]
-    if row.empty:
-        raise ValueError(f"no archetype found for building_type={building_type}, urt={urt}, vintage={vintage}")
-
-    region_to_params: dict[str, dict[str, float]] = {}
-    for _, record in row.iterrows():
-        region_to_params[str(record["region"])] = {
-            col: float(record[col]) for col in ARCHETYPE_PARAMETER_COLUMNS
-        }
-
-    template = xr.DataArray(
-        np.full(region_raster.shape, np.nan),
-        dims=region_raster.dims,
-        coords=region_raster.coords,
-    )
-    param_arrays: dict[str, xr.DataArray] = {}
-    for col in ARCHETYPE_PARAMETER_COLUMNS:
-        grid = template.copy()
-        for region, params in region_to_params.items():
-            grid = xr.where(region_raster == region, params[col], grid)
-        param_arrays[col] = grid
-
-    solar_aligned = solar.sel(lat=region_raster.lat, lon=region_raster.lon)
-    for month in MONTHS:
-        param_arrays[f"solar_vertical_m{month:02d}"] = solar_aligned["solar_vertical"].sel(month=month).drop_vars("month")
-        param_arrays[f"solar_horizontal_m{month:02d}"] = solar_aligned["solar_horizontal"].sel(month=month).drop_vars("month")
-
-    return xr.Dataset(data_vars=param_arrays)
-
-
-def run_chilled_gridded_ei(
-    climate: xr.Dataset,
-    parameters: xr.Dataset,
-    *,
-    assumptions: ChilledEnergyAssumptions | None = None,
-    duration: Duration = "daily",
-    spatial_dims: tuple[str, ...] = ("lat", "lon"),
-) -> xr.Dataset:
-    """Evaluate CHILLED EI on the full grid via evaluate_gridded_kernel."""
-
-    return evaluate_gridded_kernel(
-        create_chilled_kernel(assumptions=assumptions),
-        climate,
-        parameters,
-        duration=duration,
-        spatial_dims=spatial_dims,
-    )
-
-
-def build_chilled_archetype_mapping(
-    spatial_units: pd.DataFrame,
-    archetypes: pd.DataFrame,
-    solar_climatology: xr.Dataset,
-) -> pd.DataFrame:
-    """Explode spatial units to region-matched ALPS2025 archetypes and attach solar climatology.
-
-    The ALPS2025 source table already includes the sfh×urban and mfh×rural
-    combinations. Those rows are consumed as upstream modeling assumptions,
-    not repaired into older urban/rural proxy semantics inside impacts.
-    """
-
-    missing_units = REQUIRED_SPATIAL_UNIT_COLUMNS.difference(spatial_units.columns)
-    if missing_units:
-        missing_list = ", ".join(sorted(missing_units))
-        raise ValueError(f"spatial_units missing required columns: {missing_list}")
-
-    archetype_table = validate_archetype_table(archetypes.copy())
-    solar = normalize_chilled_solar_climatology(solar_climatology)
-
-    base = spatial_units.reset_index(drop=True).copy()
-    if "spatial_unit_id" not in base.columns:
-        base["spatial_unit_id"] = np.arange(len(base), dtype=int)
-
-    mapping = base.merge(
-        archetype_table,
-        on="region",
-        how="inner",
-        validate="many_to_many",
-        suffixes=("", "_archetype"),
-    ).reset_index(drop=True)
-    if mapping.empty:
-        raise ValueError("no spatial units matched the archetype regions")
-
-    sampling_index = mapping[["grid_lat", "grid_lon"]].copy()
-    sampling_index["entity_id"] = np.arange(len(mapping), dtype=int)
-    sampled = attach_gridded_dataset(
-        sampling_index,
-        solar,
-        entity_id_column="entity_id",
-        metadata_columns=("entity_id",),
-    )
-
-    for month in MONTHS:
-        mapping[f"solar_vertical_m{month:02d}"] = sampled["solar_vertical"].sel(month=month).to_numpy()
-        mapping[f"solar_horizontal_m{month:02d}"] = sampled["solar_horizontal"].sel(month=month).to_numpy()
-
-    if "permanent" not in mapping.columns:
-        mapping["permanent"] = np.nan
-
-    return mapping
-
-
 def create_chilled_kernel(
     assumptions: ChilledEnergyAssumptions | None = None,
+    *,
+    entity_chunk: int = 10_000,
+    time_chunk: int = 365,
 ) -> ImpactKernel:
-    """Build the CHILLED production kernel on the shared mapped-kernel contract."""
+    """Build the CHILLED production kernel on the shared mapped-kernel contract.
+
+    ``entity_chunk`` and ``time_chunk`` control the dask rechunk at kernel
+    entry. They are surfaced as explicit args so a calling script can tune
+    them per-run (e.g. via env vars) without mutating module state.
+    """
 
     params = assumptions or ChilledEnergyAssumptions()
     return ImpactKernel(
         name="chilled_buildings",
         normalize_inputs=normalize_chilled_climate_inputs,
-        physics_kernel=partial(_evaluate_chilled_kernel, assumptions=params),
+        physics_kernel=partial(
+            _evaluate_chilled_kernel,
+            assumptions=params,
+            entity_chunk=entity_chunk,
+            time_chunk=time_chunk,
+        ),
         metadata_columns=CHILLED_METADATA_COLUMNS,
-    )
-
-
-def run_chilled_archetype_ei(
-    spatial_units: pd.DataFrame,
-    climate: xr.Dataset,
-    archetypes: pd.DataFrame,
-    solar_climatology: xr.Dataset,
-    *,
-    assumptions: ChilledEnergyAssumptions | None = None,
-    duration: Duration = "daily",
-) -> xr.Dataset:
-    """Evaluate CHILLED energy intensity at native spatial units."""
-
-    mapping = build_chilled_archetype_mapping(
-        spatial_units=spatial_units,
-        archetypes=archetypes,
-        solar_climatology=solar_climatology,
-    )
-    return evaluate_kernel(
-        create_chilled_kernel(assumptions=assumptions),
-        mapping,
-        climate,
-        duration=duration,
     )
 
 
@@ -512,6 +154,8 @@ def _evaluate_chilled_kernel(
     attached: xr.Dataset,
     *,
     assumptions: ChilledEnergyAssumptions,
+    entity_chunk: int,
+    time_chunk: int,
 ) -> EvaluationResult:
     if "time" not in attached.sizes:
         raise ValueError("attached climate inputs must include a time dimension")
@@ -523,12 +167,9 @@ def _evaluate_chilled_kernel(
     # those with the monthly parameter arrays scales the dask graph to
     # millions of tasks at the 85-year × global-0.5° horizon — scheduler
     # overhead drives OOM before any single chunk gets large.
-    entity_chunk = min(_KERNEL_ENTITY_CHUNK, attached.sizes["entity"])
-    time_chunk = min(_KERNEL_TIME_CHUNK, attached.sizes["time"])
+    entity_chunk = min(entity_chunk, attached.sizes["entity"])
+    time_chunk = min(time_chunk, attached.sizes["time"])
     attached = attached.chunk({"time": time_chunk, "entity": entity_chunk})
-
-    time_index = attached.indexes["time"]
-    month_index = np.asarray(time_index.month - 1, dtype=np.int32)
 
     air_temperature = attached["air_temperature_c"].transpose("time", "entity")
     solar_vertical = _monthly_static_array(attached, prefix="solar_vertical")
@@ -547,46 +188,45 @@ def _evaluate_chilled_kernel(
     ach_op = _entity_coord(attached, "ach_op")
     gn_int = _entity_coord(attached, "gn_int")
 
-    gn_sol = solar_vertical * gl_perc * gl_g * gl_sh + solar_horizontal * 0.04 * u_roof * roof_area * roof_abs
-    h_tr = u_val * area_env
-    h_v_cl = 1200.0 * vol * ach_cl / 3600.0
-    h_v_op = 1200.0 * vol * ach_op / 3600.0
-    t_bal_h = assumptions.heating_setpoint_c - ((gn_int + gn_sol) / (h_tr + h_v_cl))
-    t_bal_c = assumptions.cooling_setpoint_c - ((gn_int + gn_sol) / (h_tr + h_v_cl))
-    t_max_c = assumptions.cooling_max_c - ((gn_int + gn_sol) / (h_tr + h_v_op))
+    gn_sol = _solar_gain(
+        solar_vertical, solar_horizontal,
+        gl_perc=gl_perc, gl_g=gl_g, gl_sh=gl_sh,
+        roof_area=roof_area, roof_abs=roof_abs, u_roof=u_roof,
+    )
+    h_tr = _transmission_loss_coefficient(u_val, area_env)
+    h_v_cl = _ventilation_loss_coefficient(vol, ach_cl)
+    h_v_op = _ventilation_loss_coefficient(vol, ach_op)
 
-    # Chunk on entity before the month→time broadcast so the (time, entity)
-    # result stays dask-backed, then rechunk on time: the isel propagates
-    # the month dim's chunk width (12) onto the new time dim, which
-    # mis-aligns with air_temperature's TIME_CHUNK and forces an
-    # intersection rechunk during xr.where that inflates task count by
-    # ~30× per output variable.
-    month_indexer = xr.DataArray(month_index, dims=("time",))
-    t_bal_h_daily = (
-        t_bal_h.chunk({"entity": entity_chunk}).isel(month=month_indexer).chunk({"time": time_chunk})
-    )
-    t_bal_c_daily = (
-        t_bal_c.chunk({"entity": entity_chunk}).isel(month=month_indexer).chunk({"time": time_chunk})
-    )
-    t_max_c_daily = (
-        t_max_c.chunk({"entity": entity_chunk}).isel(month=month_indexer).chunk({"time": time_chunk})
-    )
+    gn_total = gn_int + gn_sol
+    t_bal_h = _balance_temperature(assumptions.heating_setpoint_c, gn_total, h_tr + h_v_cl)
+    t_bal_c = _balance_temperature(assumptions.cooling_setpoint_c, gn_total, h_tr + h_v_cl)
+    t_max_c = _balance_temperature(assumptions.cooling_max_c, gn_total, h_tr + h_v_op)
 
-    vdd_h = xr.where(t_bal_h_daily >= air_temperature, t_bal_h_daily - air_temperature, 0.0)
-    vdd_tmax_c = xr.where(air_temperature >= t_max_c_daily, air_temperature - t_max_c_daily, 0.0)
+    t_bal_h_daily = _project_monthly_to_daily(t_bal_h, air_temperature, entity_chunk, time_chunk)
+    t_bal_c_daily = _project_monthly_to_daily(t_bal_c, air_temperature, entity_chunk, time_chunk)
+    t_max_c_daily = _project_monthly_to_daily(t_max_c, air_temperature, entity_chunk, time_chunk)
+
+    vdd_h = _degree_days(t_bal_h_daily, air_temperature)
+    vdd_tmax_c = _degree_days(air_temperature, t_max_c_daily)
     nd = (air_temperature - t_max_c_daily > 0.0).astype(float)
     nf = (air_temperature > t_bal_c_daily).astype(float)
 
-    q_c = (h_tr + h_v_cl) * assumptions.cooling_hours_fraction * (vdd_tmax_c + ((t_max_c_daily - t_bal_c_daily) * nd)) * 86400.0 / 1e6
+    q_c = (
+        (h_tr + h_v_cl)
+        * assumptions.cooling_hours_fraction
+        * (vdd_tmax_c + ((t_max_c_daily - t_bal_c_daily) * nd))
+        * _DAILY_POWER_TO_MJ
+    )
+    q_h = (h_tr + h_v_cl) * assumptions.heating_hours_fraction * vdd_h * _DAILY_POWER_TO_MJ
+
     cooling_energy_ac = q_c / assumptions.ac_cop
     cooling_energy_fan = (
         assumptions.fan_hours_fraction
         * assumptions.fan_power_w
         * nf
-        * 86400.0
-        / (1e6 * assumptions.area_per_fan_m2)
+        * _DAILY_POWER_TO_MJ
+        / assumptions.area_per_fan_m2
     )
-    q_h = (h_tr + h_v_cl) * assumptions.heating_hours_fraction * vdd_h * 86400.0 / 1e6
     heating_energy = q_h / assumptions.heating_efficiency
 
     return EvaluationResult(
@@ -612,6 +252,75 @@ def _evaluate_chilled_kernel(
     )
 
 
+def _solar_gain(
+    solar_vertical: xr.DataArray,
+    solar_horizontal: xr.DataArray,
+    *,
+    gl_perc: xr.DataArray,
+    gl_g: xr.DataArray,
+    gl_sh: xr.DataArray,
+    roof_area: xr.DataArray,
+    roof_abs: xr.DataArray,
+    u_roof: xr.DataArray,
+) -> xr.DataArray:
+    """Combined solar heat gain from vertical apertures and the roof."""
+
+    return (
+        solar_vertical * gl_perc * gl_g * gl_sh
+        + solar_horizontal * _ROOF_HORIZONTAL_WEIGHT * u_roof * roof_area * roof_abs
+    )
+
+
+def _transmission_loss_coefficient(u_val: xr.DataArray, area_env: xr.DataArray) -> xr.DataArray:
+    """Envelope transmission heat-loss coefficient ``U·A``."""
+
+    return u_val * area_env
+
+
+def _ventilation_loss_coefficient(vol: xr.DataArray, ach: xr.DataArray) -> xr.DataArray:
+    """Ventilation heat-loss coefficient ``ρ·c_p·V·ach / 3600``."""
+
+    return _AIR_VOLUMETRIC_HEAT_CAPACITY * vol * ach / 3600.0
+
+
+def _balance_temperature(
+    setpoint_c: float,
+    gain_total: xr.DataArray,
+    loss_coefficient: xr.DataArray,
+) -> xr.DataArray:
+    """Outdoor temperature at which internal gains exactly offset losses to the setpoint."""
+
+    return setpoint_c - (gain_total / loss_coefficient)
+
+
+def _degree_days(reference: xr.DataArray, baseline: xr.DataArray) -> xr.DataArray:
+    """Positive part of ``reference - baseline`` (degree-day-style accumulator)."""
+
+    return xr.where(reference >= baseline, reference - baseline, 0.0)
+
+
+def _project_monthly_to_daily(
+    monthly: xr.DataArray,
+    daily_template: xr.DataArray,
+    entity_chunk: int,
+    time_chunk: int,
+) -> xr.DataArray:
+    """Broadcast a (month, entity) array onto the daily time axis of `daily_template`.
+
+    Chunk on entity before the month→time broadcast so the (time, entity)
+    result stays dask-backed, then rechunk on time: the isel propagates
+    the month dim's chunk width (12) onto the new time dim, which
+    mis-aligns with the daily TIME_CHUNK and forces an intersection
+    rechunk during xr.where that inflates task count by ~30× per output
+    variable.
+    """
+
+    time_index = daily_template.indexes["time"]
+    month_index = np.asarray(time_index.month - 1, dtype=np.int32)
+    indexer = xr.DataArray(month_index, dims=("time",))
+    return monthly.chunk({"entity": entity_chunk}).isel(month=indexer).chunk({"time": time_chunk})
+
+
 def _monthly_static_array(attached: xr.Dataset, *, prefix: str) -> xr.DataArray:
     arrays = [_entity_coord(attached, f"{prefix}_m{month:02d}") for month in MONTHS]
     return xr.concat(arrays, dim=xr.IndexVariable("month", np.asarray(MONTHS, dtype=int)))
@@ -619,4 +328,3 @@ def _monthly_static_array(attached: xr.Dataset, *, prefix: str) -> xr.DataArray:
 
 def _entity_coord(attached: xr.Dataset, name: str) -> xr.DataArray:
     return xr.DataArray(attached.coords[name].data, dims=("entity",), coords={"entity": attached.coords["entity"]})
-

@@ -1,7 +1,8 @@
 """Production CHILLED matrix runner.
 
 One SLURM array task runs one (GCM, scenario, building_type, urt, vintage)
-combo through ``run_chilled_gridded_ei`` using the #421-verified recipe:
+combo through ``evaluate_gridded_kernel`` with a CHILLED kernel instance,
+using the #421-verified recipe:
 10-year outer year-batching with per-batch to_netcdf to a per-task tmp dir,
 ``xr.open_mfdataset`` coalesce to ``<final>.tmp``, finite-verify, atomic rename.
 
@@ -194,16 +195,16 @@ def main() -> int:
 
     import xarray as xr
 
-    from impacts.buildings.chilled import (
-        ChilledEnergyAssumptions,
+    from impacts.domain.buildings.chilled import ChilledEnergyAssumptions, create_chilled_kernel
+    from impacts.domain.buildings.chilled_io import (
         build_chilled_parameter_grids,
         load_ewembi_solar_climatology,
         load_message_ix_buildings_archetypes,
         load_message_ix_buildings_parametric_runs,
         load_r12_region_raster,
-        run_chilled_gridded_ei,
     )
     from impacts.isimip import ISIMIPVariable, isimip3b_paths, load_isimip_variable
+    from impacts.kernel import evaluate_gridded_kernel
 
     stage("imports done")
 
@@ -234,6 +235,8 @@ def main() -> int:
     )
     stage("parameter grids built")
 
+    kernel = create_chilled_kernel(assumptions=assumptions)
+
     # Year-batched incremental-write path (#421 verified recipe): each batch is
     # computed, cast to float32, reset_index'd, and written to its own tmp
     # netcdf, then released from memory. Bounds RSS+cache to one-batch worth
@@ -250,8 +253,8 @@ def main() -> int:
         slice_end = f"{b1}-12-31"
         batch_climate = climate.sel(time=slice(slice_start, slice_end))
         stage(f"batch {b0}-{b1} start")
-        batch_result = run_chilled_gridded_ei(
-            batch_climate, parameters, assumptions=assumptions, duration="seasonal",
+        batch_result = evaluate_gridded_kernel(
+            kernel, batch_climate, parameters, duration="seasonal",
         ).load().sel(year=slice(b0, b1))
         batch_result = batch_result.astype({v: "float32" for v in batch_result.data_vars})
         batch_file = batch_dir / f"batch_{b0}_{b1}.nc"

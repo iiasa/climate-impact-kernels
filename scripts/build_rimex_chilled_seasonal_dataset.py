@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from climateresponse import (  # noqa: E402
+from impacts.climatecore import (  # noqa: E402
     attach_gridded_dataset,
     attach_warming_levels,
     build_warming_level_assignments,
@@ -34,7 +34,7 @@ from climateresponse import (  # noqa: E402
     grid_cell_area,
 )
 
-from impacts.buildings.rimex import (  # noqa: E402
+from impacts.domain.buildings.rimex import (  # noqa: E402
     CHILLED_VARIABLE_REDUCTIONS,
     load_country_raster,
     parse_chilled_matrix_filename,
@@ -67,13 +67,13 @@ def parse_args() -> argparse.Namespace:
         "--gaul-raster-path",
         type=Path,
         default=None,
-        help="Override the GAUL country raster path; defaults to impacts.buildings.chilled.DEFAULT_GAUL_RASTER_PATH.",
+        help="Override the GAUL country raster path; defaults to impacts.domain.buildings.chilled_config.DEFAULT_GAUL_RASTER_PATH.",
     )
     parser.add_argument(
         "--gaul-csv-path",
         type=Path,
         default=None,
-        help="Override the GAUL lookup CSV path; defaults to impacts.buildings.chilled.DEFAULT_GAUL_CSV_PATH.",
+        help="Override the GAUL lookup CSV path; defaults to impacts.domain.buildings.chilled_config.DEFAULT_GAUL_CSV_PATH.",
     )
     parser.add_argument("--bin-width", type=float, default=0.1)
     parser.add_argument("--min-warming-level", type=float, default=0.0)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "impacts"
-version = "0.1.8"
+version = "0.1.9"
 description = "Domain-oriented climate-impact preprocessing utilities with a shared xarray-native core."
 readme = "README.md"
 requires-python = ">=3.13"

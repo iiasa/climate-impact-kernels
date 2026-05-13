@@ -1,7 +1,7 @@
 """Single-combo CHILLED diagnostic runner.
 
 Runs one (GCM, scenario, building_type, urt, vintage) combo through
-``run_chilled_gridded_ei`` with stage-by-stage instrumentation and a
+``evaluate_gridded_kernel`` with stage-by-stage instrumentation and a
 tmp-path + atomic rename write protocol.
 
 Designed to drive a bounded memory sweep on UniCC: dask scheduler,
@@ -208,27 +208,24 @@ def main() -> int:
     sampler.start()
 
     # Imports deferred so `diag configured` shows a clean pre-import baseline
-    from impacts.buildings import chilled as chilled_mod
-    from impacts.buildings.chilled import (
-        ChilledEnergyAssumptions,
+    from impacts.domain.buildings.chilled import ChilledEnergyAssumptions, create_chilled_kernel
+    from impacts.domain.buildings.chilled_io import (
         build_chilled_parameter_grids,
         load_ewembi_solar_climatology,
         load_message_ix_buildings_archetypes,
         load_message_ix_buildings_parametric_runs,
         load_r12_region_raster,
-        run_chilled_gridded_ei,
     )
     from impacts.isimip import ISIMIPVariable, isimip3b_paths, load_isimip_variable
+    from impacts.kernel import evaluate_gridded_kernel
 
-    # Allow override of kernel-entry entity/time chunk without editing chilled.py
-    if (ec := os.environ.get("CHILLED_KERNEL_ENTITY_CHUNK")):
-        chilled_mod._KERNEL_ENTITY_CHUNK = int(ec)
-    if (tc := os.environ.get("CHILLED_KERNEL_TIME_CHUNK")):
-        chilled_mod._KERNEL_TIME_CHUNK = int(tc)
+    # Kernel-entry chunk sizes are explicit args on create_chilled_kernel;
+    # the harness env vars set them per-run without touching module state.
+    entity_chunk = int(os.environ.get("CHILLED_KERNEL_ENTITY_CHUNK", "10000"))
+    kernel_time_chunk = int(os.environ.get("CHILLED_KERNEL_TIME_CHUNK", "365"))
     stage(
         "imports done",
-        f"_KERNEL_ENTITY_CHUNK={chilled_mod._KERNEL_ENTITY_CHUNK} "
-        f"_KERNEL_TIME_CHUNK={chilled_mod._KERNEL_TIME_CHUNK}"
+        f"entity_chunk={entity_chunk} time_chunk={kernel_time_chunk}",
     )
 
     watxene_root = Path(os.environ["WATXENE_PATH"])
@@ -258,6 +255,12 @@ def main() -> int:
     )
     stage("parameter grids built", describe_dataset(parameters))
 
+    kernel = create_chilled_kernel(
+        assumptions=assumptions,
+        entity_chunk=entity_chunk,
+        time_chunk=kernel_time_chunk,
+    )
+
     year_batch = int(os.environ.get("CHILLED_YEAR_BATCH", "0"))
     import shutil
     import xarray as xr
@@ -284,8 +287,8 @@ def main() -> int:
             slice_end = f"{b1}-12-31"
             batch_climate = climate.sel(time=slice(slice_start, slice_end))
             stage(f"batch {b0}-{b1} start  time_slice=({slice_start},{slice_end})")
-            batch_result = run_chilled_gridded_ei(
-                batch_climate, parameters, assumptions=assumptions, duration="seasonal",
+            batch_result = evaluate_gridded_kernel(
+                kernel, batch_climate, parameters, duration="seasonal",
             ).load().sel(year=slice(b0, b1))
             batch_result = batch_result.astype({v: "float32" for v in batch_result.data_vars})
             batch_file = batch_dir / f"batch_{b0}_{b1}.nc"
@@ -299,8 +302,8 @@ def main() -> int:
         reset = xr.open_mfdataset(batch_files, combine="by_coords", chunks={})
         stage("batches combined (lazy)", describe_dataset(reset))
     else:
-        result = run_chilled_gridded_ei(
-            climate, parameters, assumptions=assumptions, duration="seasonal",
+        result = evaluate_gridded_kernel(
+            kernel, climate, parameters, duration="seasonal",
         )
         stage("seasonal graph constructed", describe_dataset(result))
 

@@ -20,12 +20,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from impacts.buildings.chilled import (
-    _KERNEL_ENTITY_CHUNK,
-    _KERNEL_TIME_CHUNK,
+from impacts.domain.buildings.chilled import (
     ChilledEnergyAssumptions,
     _evaluate_chilled_kernel,
 )
+
+_DEFAULT_ENTITY_CHUNK = 10_000
+_DEFAULT_TIME_CHUNK = 365
 
 
 def build_attached(*, time: int, entity: int) -> xr.Dataset:
@@ -61,10 +62,15 @@ def main() -> None:
     warnings.filterwarnings("ignore")
 
     print(f"TIME={args.time}, ENTITY={args.entity}")
-    print(f"_KERNEL_TIME_CHUNK={_KERNEL_TIME_CHUNK}, _KERNEL_ENTITY_CHUNK={_KERNEL_ENTITY_CHUNK}")
+    print(f"time_chunk={_DEFAULT_TIME_CHUNK}, entity_chunk={_DEFAULT_ENTITY_CHUNK}")
 
     attached = build_attached(time=args.time, entity=args.entity)
-    result = _evaluate_chilled_kernel(attached, assumptions=ChilledEnergyAssumptions())
+    result = _evaluate_chilled_kernel(
+        attached,
+        assumptions=ChilledEnergyAssumptions(),
+        entity_chunk=_DEFAULT_ENTITY_CHUNK,
+        time_chunk=_DEFAULT_TIME_CHUNK,
+    )
 
     all_keys: set[object] = set()
     for name, arr in result.data_vars.items():
