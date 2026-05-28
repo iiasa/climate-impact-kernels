@@ -93,7 +93,12 @@ construction, regional aggregation, and the RIME-X adapter.
 Modules: `mapping.py`, `cooling.py`, `wet.py`, `dry.py`,
 `aggregation.py`, `rimex.py`.
 
-Checked-in artifacts under `data/`:
+Derived mapping/cooling artifacts the thermoelectric workflows operate
+on. These are **not distributed with the repository**: they derive from
+license-restricted WEPP/PLATTS source data and are git-ignored.
+Regenerate them with the `build_*`/`write_*` helpers in `mapping.py` and
+`cooling.py` from the licensed source fleet table, or supply your own
+under `data/`:
 
 - `unit_cell_mapping.parquet`
 - `recovered_unit_cell_mapping.parquet`

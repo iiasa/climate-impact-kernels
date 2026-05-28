@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "impacts"
-version = "0.1.11"
+version = "0.1.12"
 description = "Domain-oriented climate-impact preprocessing utilities with a shared xarray-native core."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -34,6 +34,9 @@ dev = [
     "import-linter>=2.0",
     "pytest>=8.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["impacts*"]
