@@ -75,8 +75,11 @@ From `impacts.kernel`:
   suite and any analysis where the analytical units are intrinsically a list
   (e.g. country × archetype).
 - `evaluate_gridded_kernel(kernel, climate, parameters, duration)` —
-  gridded evaluation. Used by the production matrix runner; output is
-  `(time, lat, lon)`.
+  gridded evaluation. Used by the production matrix runner. Output is
+  entity-stacked: `(time, entity)` for `native`/`daily` (and
+  `(season, year, entity)` after seasonal aggregation), with `lat`/`lon`
+  carried as coordinates on `entity`. The production runner calls
+  `reset_index("entity")` to write a `(time, lat, lon)` product.
 
 Both primitives present the same `(time, entity)` shape to the physics
 kernel internally; the kernel body is shape-agnostic.

@@ -6,7 +6,7 @@ validators, and grid/mapping builders live in
 ``impacts.domain.buildings.chilled_io``; path defaults live in
 ``impacts.domain.buildings.chilled_config``.
 
-Callers compose the kernel with ``impacts.kernel.evaluate_kernel`` (mapped
+Callers compose the kernel with ``impacts.kernel.evaluate_mapped_kernel`` (mapped
 DataFrame inputs) or ``impacts.kernel.evaluate_gridded_kernel`` (gridded
 parameter Dataset inputs); both reach the same physics.
 """
