@@ -1,3 +1,6 @@
-"""Climate-impact domains."""
+"""Climate-impact kernels over a shared xarray-native core.
 
-__all__ = ["buildings", "thermoelectric"]
+Public surfaces are imported from their subpackages directly:
+``impacts.climatecore``, ``impacts.domain.thermoelectric``,
+``impacts.domain.buildings``, ``impacts.kernel``, ``impacts.isimip``.
+"""

@@ -5,6 +5,21 @@ physics kernels, built on a shared xarray-native core.
 
 Organized as `impacts.<area>`, not as a pipeline CLI.
 
+## Install
+
+```sh
+pip install git+https://github.com/iiasa/climate-impact-kernels.git
+# or, for development:
+git clone https://github.com/iiasa/climate-impact-kernels.git
+cd climate-impact-kernels
+uv sync
+```
+
+Requires Python 3.13+. Cluster path defaults (ISIMIP forcing, CHILLED
+inputs) are controlled via environment variables — see
+[docs/buildings.md](docs/buildings.md) and
+[docs/thermoelectric.md](docs/thermoelectric.md).
+
 ## Mental model
 
 ```
@@ -78,7 +93,12 @@ construction, regional aggregation, and the RIME-X adapter.
 Modules: `mapping.py`, `cooling.py`, `wet.py`, `dry.py`,
 `aggregation.py`, `rimex.py`.
 
-Checked-in artifacts under `data/`:
+Derived mapping/cooling artifacts the thermoelectric workflows operate
+on. These are **not distributed with the repository**: they derive from
+license-restricted WEPP/PLATTS source data and are git-ignored.
+Regenerate them with the `build_*`/`write_*` helpers in `mapping.py` and
+`cooling.py` from the licensed source fleet table, or supply your own
+under `data/`:
 
 - `unit_cell_mapping.parquet`
 - `recovered_unit_cell_mapping.parquet`
@@ -100,7 +120,9 @@ evaluation, not a separate downstream convention.
 
 ### `impacts.isimip`
 
-Concrete ISIMIP3b file discovery and variable loading from pdrive.
+Concrete ISIMIP3b file discovery and variable loading. Input root is
+configurable via the `WATXENE_PATH` environment variable; the default
+points at the IIASA cluster mount (`/mnt/p/watxene`).
 
 ## Design constraints
 
@@ -127,14 +149,17 @@ Focused test subsets:
 
 ## RIME-X adapters
 
+[RIME-X](https://github.com/iiasa/rimeX) is the IIASA probabilistic
+emulator for regional climate indicators. Domain modules expose adapters
+that translate impact-kernel outputs into the xarray fields RIME-X
+consumes.
+
 - `impacts.climatecore` owns the generic xarray-first warming-level
   attachment and quantile-surface builders.
 - `impacts.domain.thermoelectric.rimex` reshapes the thermoelectric
   country parquet into an xarray UCR field.
 - `impacts.domain.buildings.rimex` aggregates CHILLED entity outputs to
   countries and attaches filename-derived archetype metadata.
-
-The durable artifact scripts under `scripts/` remain the I/O boundary.
 
 ## Provenance notes
 
@@ -143,3 +168,26 @@ fleet table with unit attributes, cooling assignments, and partial
 coordinate coverage. The conservative recovery path intentionally
 leaves much of the missing fleet unresolved rather than inferring
 locations heuristically.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+## Citation
+
+This package integrates physics kernels and methods from upstream
+scientific work. Results derived from a specific kernel should cite the
+underlying method paper or upstream repository in addition to (or in
+place of) this software:
+
+- **CHILLED** (buildings cooling demand) — see
+  [iiasa/message-ix-buildings](https://github.com/iiasa/message-ix-buildings)
+  and the references in [docs/buildings.md](docs/buildings.md).
+- **Thermoelectric production and cooling** — see method notes in
+  [docs/thermoelectric.md](docs/thermoelectric.md).
+- **RIME-X** (regional climate-indicator emulation) — see
+  [iiasa/rimeX](https://github.com/iiasa/rimeX).
+
+For software-level citation, point at
+<https://github.com/iiasa/climate-impact-kernels>. A formal citation
+entry will be added when an `impacts`-specific paper or DOI is available.

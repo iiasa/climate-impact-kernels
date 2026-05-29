@@ -29,19 +29,26 @@ offset.
 
 ## Evaluation
 
+The evaluation engine lives in `impacts.climatecore.evaluation` and is reached
+through `impacts.kernel.evaluate_mapped_kernel` / `evaluate_gridded_kernel`,
+which adapt an `ImpactKernel` onto it. The two functions below are that internal
+seam — not part of the `impacts.climatecore` public API.
+
 - `evaluate_mapped_dataset` — workflows where a tabular mapping
   supplies entity coordinates. Normalizes climate inputs, attaches
-  gridded values to mapped entities, runs the kernel, applies clips,
+  gridded values to mapped entities, optionally samples extra
+  `gridded_coords` fields per entity, runs the physics, applies clips,
   and packages the result.
 - `evaluate_gridded_dataset` — workflows where gridded climate inputs
   and gridded parameter fields share spatial dimensions. Stacks the
   spatial dimensions into `entity`, attaches parameters, runs the
-  kernel, applies clips, and packages the result.
-- `EvaluationResult` — structured return type for kernels that supply
-  data variables and dataset attributes without constructing the full
-  output dataset themselves.
+  physics, applies clips, and packages the result.
+- `EvaluationResult` — structured return type (public, re-exported from
+  `impacts.climatecore`) for physics functions that supply data
+  variables and dataset attributes without constructing the full output
+  dataset themselves.
 
-Kernel callables operate on already-normalized, already-attached data.
+A kernel's physics operates on already-normalized, already-attached data.
 Domain physics — cooling equations, building energy kernels,
 crop-response logic — lives above this layer in the domain modules.
 

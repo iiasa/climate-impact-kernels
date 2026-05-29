@@ -27,7 +27,10 @@
 
 ## Core Artifacts
 
-The main checked-in artifacts under `data/` are:
+These derived artifacts are **not distributed with the repository** —
+they derive from license-restricted WEPP/PLATTS source data and are
+git-ignored. Regenerate them with the `build_*`/`write_*` helpers below
+from the licensed source fleet table, or supply your own under `data/`:
 
 - `unit_cell_mapping.parquet`
   Exact coordinate-only unit-to-cell mapping.

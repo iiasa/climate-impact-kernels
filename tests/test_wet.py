@@ -6,7 +6,7 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from impacts.kernel import evaluate_kernel
+from impacts.kernel import evaluate_mapped_kernel
 from impacts.domain.thermoelectric.wet import (
     WetCoolingAssumptions,
     build_wet_cooling_mapping,
@@ -147,7 +147,7 @@ class WetCoolingContractTest(unittest.TestCase):
 
     def test_compute_monthly_wet_cooling_impacts_matches_li_equations(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native")
+        monthly = evaluate_mapped_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native")
         params = WetCoolingAssumptions()
 
         self.assertEqual(monthly.sizes["entity"], 5)
@@ -225,13 +225,13 @@ class WetCoolingContractTest(unittest.TestCase):
 
     def test_aggregate_seasonal_wet_cooling_impacts_uses_climateresponse(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        seasonal = evaluate_kernel(
+        seasonal = evaluate_mapped_kernel(
             create_wet_cooling_kernel(), mapping, self.climate, duration="seasonal"
         ).compute()
 
         self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
         self.assertEqual(seasonal.coords["season"].values.tolist(), ["DJF", "MAM", "JJA", "SON"])
-        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native")
+        monthly = evaluate_mapped_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native")
         expected_djf = monthly["capacity_factor"].sel(time=["2001-01-01", "2001-02-01"], entity=101).mean().item()
         self.assertAlmostEqual(
             seasonal["capacity_factor"].sel(season="DJF", year=2001, entity=101).item(),
@@ -265,7 +265,7 @@ class WetCoolingDaskTest(WetCoolingContractTest):
 
     def test_compute_monthly_wet_cooling_impacts_matches_li_equations(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        monthly = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native").compute()
+        monthly = evaluate_mapped_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="native").compute()
         params = WetCoolingAssumptions()
 
         self.assertEqual(monthly.sizes["entity"], 5)
@@ -286,7 +286,7 @@ class WetCoolingDaskTest(WetCoolingContractTest):
 
     def test_aggregate_seasonal_wet_cooling_impacts_uses_climateresponse(self) -> None:
         mapping = build_wet_cooling_mapping(self.unit_cell_mapping, self.cooling_mapping)
-        seasonal = evaluate_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="seasonal").compute()
+        seasonal = evaluate_mapped_kernel(create_wet_cooling_kernel(), mapping, self.climate, duration="seasonal").compute()
         self.assertEqual(seasonal["capacity_factor"].dims, ("season", "year", "entity"))
 
 

@@ -231,8 +231,8 @@ def create_dry_cooling_kernel(
     params = assumptions or DryCoolingAssumptions()
     return ImpactKernel(
         name="dry_cooling",
-        normalize_inputs=normalize_dry_cooling_climate_inputs,
-        physics_kernel=partial(_evaluate_dry_cooling_kernel, params=params),
+        normalize=normalize_dry_cooling_climate_inputs,
+        physics=partial(_dry_cooling_physics, params=params),
         metadata_columns=DRY_METADATA_COLUMNS,
         clips={
             "efficiency_loss": (0.0, None),
@@ -243,14 +243,14 @@ def create_dry_cooling_kernel(
     )
 
 
-def _evaluate_dry_cooling_kernel(
-    attached: xr.Dataset,
+def _dry_cooling_physics(
+    inputs: xr.Dataset,
     *,
     params: DryCoolingAssumptions,
 ) -> EvaluationResult:
-    engine_type = attached.coords["dry_cooling_engine_type"]
-    supported = attached.coords["dry_cooling_supported"]
-    air_temperature = attached["air_temperature_k"]
+    engine_type = inputs.coords["dry_cooling_engine_type"]
+    supported = inputs.coords["dry_cooling_supported"]
+    air_temperature = inputs["air_temperature_k"]
 
     efficiency_loss = xr.where(
         engine_type == "combustible_steam",
@@ -302,7 +302,7 @@ def _evaluate_dry_cooling_kernel(
             "parasitic_load": parasitic_load,
             "capacity_factor": capacity_factor.rename("capacity_factor"),
             "capacity_loss": (1.0 - capacity_factor).rename("capacity_loss"),
-            "usable_capacity_mw": (capacity_factor * attached.coords["mw"]).rename("usable_capacity_mw"),
+            "usable_capacity_mw": (capacity_factor * inputs.coords["mw"]).rename("usable_capacity_mw"),
         },
         attrs={
             "combustible_steam_parasitic_load_fraction": (

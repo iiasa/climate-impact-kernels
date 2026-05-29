@@ -19,6 +19,11 @@ AGENTS.md
 # Local staging (UniCC SLURM scripts, smoke tests, ad-hoc drivers)
 _staging/
 
+# Operational driver scripts and validation helpers (local-only until
+# parametrized for public reuse — see ticket #588).
+scripts/
+validation/
+
 # Codex scratch dir
 .codex
 .codex/

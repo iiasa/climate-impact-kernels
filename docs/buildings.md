@@ -13,7 +13,7 @@ about, tested, and re-used independently of the operational I/O scaffolding:
 | `impacts.domain.buildings.rimex` | CHILLED → RIME-X shape adapter: matrix-filename parsing, CHILLED-specific reduction map, metadata expansion. Composes the `country` primitives. |
 
 The kernel itself never touches the filesystem. Callers compose it with
-`impacts.kernel.evaluate_kernel` (mapped DataFrame inputs) or
+`impacts.kernel.evaluate_mapped_kernel` (mapped DataFrame inputs) or
 `impacts.kernel.evaluate_gridded_kernel` (gridded parameter Dataset
 inputs); both reach the same physics.
 
@@ -28,8 +28,9 @@ Important assumptions:
 - the explicit cross-combination rows in the source table are treated as
   upstream modeling assumptions, not repaired back into older proxy rules
 - climate input is daily near-surface air temperature
-- solar enters as a fixed EWEMBI monthly climatology attached to the mapping
-  table
+- solar enters as a fixed EWEMBI monthly `(month, lat, lon)` climatology; the
+  kernel reads it as a `(month, entity)` coordinate — the gridded path stacks
+  it, the mapped path samples it via `gridded_coords`
 - output duration is part of kernel evaluation: `native`, `daily`, `monthly`,
   or `seasonal`
 - `seasonal` outputs can remain dask-backed until the caller materializes or
@@ -58,20 +59,27 @@ From `impacts.domain.buildings.chilled_io`:
 - `load_ewembi_solar_climatology`, `load_r12_region_raster` — supporting
   inputs for the gridded path.
 - `build_chilled_parameter_grids` — builds the `(lat, lon)` parameter
-  Dataset consumed by `evaluate_gridded_kernel`.
+  Dataset (with solar carried as `(month, lat, lon)`) consumed by
+  `evaluate_gridded_kernel`.
 - `build_chilled_archetype_mapping` — explodes spatial units against the
-  archetype table and attaches solar climatology for the mapped path.
+  archetype table; returns `(mapping, solar)` — the mapping plus the
+  `(month, lat, lon)` solar climatology to pass as `gridded_coords`.
 - `validate_archetype_table` — exposed so callers can validate ad-hoc
   archetype tables outside the loader path.
 
 From `impacts.kernel`:
 
-- `evaluate_kernel(kernel, mapping, climate, duration)` — mapped-entity
-  evaluation. Used by the CHILLED test suite and any analysis where the
-  analytical units are intrinsically a list (e.g. country × archetype).
+- `evaluate_mapped_kernel(kernel, mapping, climate, duration, *, gridded_coords=None)`
+  — mapped-entity evaluation. `gridded_coords` carries gridded fields (e.g. the
+  CHILLED solar climatology) to sample per entity. Used by the CHILLED test
+  suite and any analysis where the analytical units are intrinsically a list
+  (e.g. country × archetype).
 - `evaluate_gridded_kernel(kernel, climate, parameters, duration)` —
-  gridded evaluation. Used by the production matrix runner; output is
-  `(time, lat, lon)`.
+  gridded evaluation. Used by the production matrix runner. Output is
+  entity-stacked: `(time, entity)` for `native`/`daily` (and
+  `(season, year, entity)` after seasonal aggregation), with `lat`/`lon`
+  carried as coordinates on `entity`. The production runner calls
+  `reset_index("entity")` to write a `(time, lat, lon)` product.
 
 Both primitives present the same `(time, entity)` shape to the physics
 kernel internally; the kernel body is shape-agnostic.

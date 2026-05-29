@@ -4,10 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "impacts"
-version = "0.1.11"
+version = "0.1.14"
 description = "Domain-oriented climate-impact preprocessing utilities with a shared xarray-native core."
 readme = "README.md"
 requires-python = ">=3.13"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Vignesh Raghunathan", email = "raghunathan@iiasa.ac.at"},
+]
 dependencies = [
     "cftime>=1.6.5",
     "dask>=2026.3.0",
@@ -20,11 +24,19 @@ dependencies = [
     "xarray>=2024.6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/iiasa/climate-impact-kernels"
+Repository = "https://github.com/iiasa/climate-impact-kernels"
+Issues = "https://github.com/iiasa/climate-impact-kernels/issues"
+
 [dependency-groups]
 dev = [
     "import-linter>=2.0",
     "pytest>=8.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["impacts*"]
