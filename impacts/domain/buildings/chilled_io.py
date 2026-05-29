@@ -18,8 +18,6 @@ import pandas as pd
 import xarray as xr
 import yaml
 
-from impacts.climatecore.transforms.spatial import attach_gridded_dataset
-
 from .chilled import ARCHETYPE_PARAMETER_COLUMNS, MONTHS
 from .chilled_config import (
     DEFAULT_ARCHETYPE_INPUT_PATH,
@@ -246,8 +244,7 @@ def build_chilled_parameter_grids(
 
     Maps region_raster values to archetype parameter values for the selected
     building_type × urt × arch rows exactly as provided by the ALPS2025 table,
-    and flattens monthly solar into 24 per-cell columns matching the
-    kernel's _monthly_static_array contract.
+    and carries monthly solar as (month, lat, lon) fields for the kernel.
     """
 
     row = archetypes.loc[
@@ -277,9 +274,8 @@ def build_chilled_parameter_grids(
         param_arrays[col] = grid
 
     solar_aligned = solar.sel(lat=region_raster.lat, lon=region_raster.lon)
-    for month in MONTHS:
-        param_arrays[f"solar_vertical_m{month:02d}"] = solar_aligned["solar_vertical"].sel(month=month).drop_vars("month")
-        param_arrays[f"solar_horizontal_m{month:02d}"] = solar_aligned["solar_horizontal"].sel(month=month).drop_vars("month")
+    param_arrays["solar_vertical"] = solar_aligned["solar_vertical"]
+    param_arrays["solar_horizontal"] = solar_aligned["solar_horizontal"]
 
     return xr.Dataset(data_vars=param_arrays)
 
@@ -288,8 +284,13 @@ def build_chilled_archetype_mapping(
     spatial_units: pd.DataFrame,
     archetypes: pd.DataFrame,
     solar_climatology: xr.Dataset,
-) -> pd.DataFrame:
-    """Explode spatial units to region-matched ALPS2025 archetypes and attach solar climatology.
+) -> tuple[pd.DataFrame, xr.Dataset]:
+    """Explode spatial units to region-matched ALPS2025 archetypes.
+
+    Returns the mapping table plus the normalized (month, lat, lon) solar
+    climatology to hand to ``evaluate_mapped_kernel(..., gridded_coords=...)``;
+    the kernel reads solar as a (month, entity) coordinate rather than from
+    flattened per-month columns.
 
     The ALPS2025 source table already includes the sfh×urban and mfh×rural
     combinations. Those rows are consumed as upstream modeling assumptions,
@@ -318,20 +319,7 @@ def build_chilled_archetype_mapping(
     if mapping.empty:
         raise ValueError("no spatial units matched the archetype regions")
 
-    sampling_index = mapping[["grid_lat", "grid_lon"]].copy()
-    sampling_index["entity_id"] = np.arange(len(mapping), dtype=int)
-    sampled = attach_gridded_dataset(
-        sampling_index,
-        solar,
-        entity_id_column="entity_id",
-        metadata_columns=("entity_id",),
-    )
-
-    for month in MONTHS:
-        mapping[f"solar_vertical_m{month:02d}"] = sampled["solar_vertical"].sel(month=month).to_numpy()
-        mapping[f"solar_horizontal_m{month:02d}"] = sampled["solar_horizontal"].sel(month=month).to_numpy()
-
     if "permanent" not in mapping.columns:
         mapping["permanent"] = np.nan
 
-    return mapping
+    return mapping, solar

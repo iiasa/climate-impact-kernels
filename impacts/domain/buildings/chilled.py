@@ -45,9 +45,6 @@ ARCHETYPE_PARAMETER_COLUMNS = (
     "roof_abs",
     "u_roof",
 )
-SOLAR_VERTICAL_COLUMNS = tuple(f"solar_vertical_m{month:02d}" for month in MONTHS)
-SOLAR_HORIZONTAL_COLUMNS = tuple(f"solar_horizontal_m{month:02d}" for month in MONTHS)
-SOLAR_COLUMNS = SOLAR_VERTICAL_COLUMNS + SOLAR_HORIZONTAL_COLUMNS
 CHILLED_METADATA_COLUMNS = (
     "spatial_unit_id",
     "region",
@@ -56,7 +53,6 @@ CHILLED_METADATA_COLUMNS = (
     "arch",
     "permanent",
     *ARCHETYPE_PARAMETER_COLUMNS,
-    *SOLAR_COLUMNS,
 )
 
 # Air density × specific heat / seconds-per-hour for the ventilation
@@ -139,54 +135,37 @@ def create_chilled_kernel(
     params = assumptions or ChilledEnergyAssumptions()
     return ImpactKernel(
         name="chilled_buildings",
-        normalize_inputs=normalize_chilled_climate_inputs,
-        physics_kernel=partial(
-            _evaluate_chilled_kernel,
-            assumptions=params,
-            entity_chunk=entity_chunk,
-            time_chunk=time_chunk,
-        ),
+        normalize=normalize_chilled_climate_inputs,
+        physics=partial(_chilled_physics, assumptions=params),
         metadata_columns=CHILLED_METADATA_COLUMNS,
+        entry_chunks={"time": time_chunk, "entity": entity_chunk},
     )
 
 
-def _evaluate_chilled_kernel(
-    attached: xr.Dataset,
+def _chilled_physics(
+    inputs: xr.Dataset,
     *,
     assumptions: ChilledEnergyAssumptions,
-    entity_chunk: int,
-    time_chunk: int,
 ) -> EvaluationResult:
-    if "time" not in attached.sizes:
-        raise ValueError("attached climate inputs must include a time dimension")
+    if "time" not in inputs.sizes:
+        raise ValueError("climate inputs must include a time dimension")
 
-    # Rechunk on (time, entity) at entry so the downstream month→time isel
-    # and xr.where broadcasts produce an O(time/TIME_CHUNK * entity/ENTITY_CHUNK)
-    # graph instead of an O(time * entity/ENTITY_CHUNK) one. Without this the
-    # raw ISIMIP loader ships (time=1, entity=full) chunks, and intersecting
-    # those with the monthly parameter arrays scales the dask graph to
-    # millions of tasks at the 85-year × global-0.5° horizon — scheduler
-    # overhead drives OOM before any single chunk gets large.
-    entity_chunk = min(entity_chunk, attached.sizes["entity"])
-    time_chunk = min(time_chunk, attached.sizes["time"])
-    attached = attached.chunk({"time": time_chunk, "entity": entity_chunk})
+    air_temperature = inputs["air_temperature_c"].transpose("time", "entity")
+    solar_vertical = inputs.coords["solar_vertical"]
+    solar_horizontal = inputs.coords["solar_horizontal"]
 
-    air_temperature = attached["air_temperature_c"].transpose("time", "entity")
-    solar_vertical = _monthly_static_array(attached, prefix="solar_vertical")
-    solar_horizontal = _monthly_static_array(attached, prefix="solar_horizontal")
-
-    gl_perc = _entity_coord(attached, "gl_perc")
-    gl_g = _entity_coord(attached, "gl_g")
-    gl_sh = _entity_coord(attached, "gl_sh")
-    roof_area = _entity_coord(attached, "roof_area")
-    roof_abs = _entity_coord(attached, "roof_abs")
-    u_roof = _entity_coord(attached, "u_roof")
-    u_val = _entity_coord(attached, "u_val")
-    area_env = _entity_coord(attached, "area_env")
-    vol = _entity_coord(attached, "vol")
-    ach_cl = _entity_coord(attached, "ach_cl")
-    ach_op = _entity_coord(attached, "ach_op")
-    gn_int = _entity_coord(attached, "gn_int")
+    gl_perc = _entity_coord(inputs, "gl_perc")
+    gl_g = _entity_coord(inputs, "gl_g")
+    gl_sh = _entity_coord(inputs, "gl_sh")
+    roof_area = _entity_coord(inputs, "roof_area")
+    roof_abs = _entity_coord(inputs, "roof_abs")
+    u_roof = _entity_coord(inputs, "u_roof")
+    u_val = _entity_coord(inputs, "u_val")
+    area_env = _entity_coord(inputs, "area_env")
+    vol = _entity_coord(inputs, "vol")
+    ach_cl = _entity_coord(inputs, "ach_cl")
+    ach_op = _entity_coord(inputs, "ach_op")
+    gn_int = _entity_coord(inputs, "gn_int")
 
     gn_sol = _solar_gain(
         solar_vertical, solar_horizontal,
@@ -202,9 +181,9 @@ def _evaluate_chilled_kernel(
     t_bal_c = _balance_temperature(assumptions.cooling_setpoint_c, gn_total, h_tr + h_v_cl)
     t_max_c = _balance_temperature(assumptions.cooling_max_c, gn_total, h_tr + h_v_op)
 
-    t_bal_h_daily = _project_monthly_to_daily(t_bal_h, air_temperature, entity_chunk, time_chunk)
-    t_bal_c_daily = _project_monthly_to_daily(t_bal_c, air_temperature, entity_chunk, time_chunk)
-    t_max_c_daily = _project_monthly_to_daily(t_max_c, air_temperature, entity_chunk, time_chunk)
+    t_bal_h_daily = _project_monthly_to_daily(t_bal_h, air_temperature)
+    t_bal_c_daily = _project_monthly_to_daily(t_bal_c, air_temperature)
+    t_max_c_daily = _project_monthly_to_daily(t_max_c, air_temperature)
 
     vdd_h = _degree_days(t_bal_h_daily, air_temperature)
     vdd_tmax_c = _degree_days(air_temperature, t_max_c_daily)
@@ -299,32 +278,31 @@ def _degree_days(reference: xr.DataArray, baseline: xr.DataArray) -> xr.DataArra
     return xr.where(reference >= baseline, reference - baseline, 0.0)
 
 
-def _project_monthly_to_daily(
-    monthly: xr.DataArray,
-    daily_template: xr.DataArray,
-    entity_chunk: int,
-    time_chunk: int,
-) -> xr.DataArray:
+def _project_monthly_to_daily(monthly: xr.DataArray, daily_template: xr.DataArray) -> xr.DataArray:
     """Broadcast a (month, entity) array onto the daily time axis of `daily_template`.
 
-    Chunk on entity before the month→time broadcast so the (time, entity)
-    result stays dask-backed, then rechunk on time: the isel propagates
-    the month dim's chunk width (12) onto the new time dim, which
-    mis-aligns with the daily TIME_CHUNK and forces an intersection
-    rechunk during xr.where that inflates task count by ~30× per output
-    variable.
+    Chunk on entity before the month→time broadcast so the (time, entity) result
+    stays dask-backed, then rechunk on time: the isel propagates the month dim's
+    chunk width onto the new time dim, mis-aligning with the daily chunk width and
+    forcing an intersection rechunk during xr.where that inflates task count. The
+    chunk widths follow `daily_template`, which the kernel-entry rechunk has
+    already sized (see ``ImpactKernel.entry_chunks``).
     """
 
     time_index = daily_template.indexes["time"]
     month_index = np.asarray(time_index.month - 1, dtype=np.int32)
     indexer = xr.DataArray(month_index, dims=("time",))
+    entity_chunk = _chunk_width(daily_template, "entity")
+    time_chunk = _chunk_width(daily_template, "time")
     return monthly.chunk({"entity": entity_chunk}).isel(month=indexer).chunk({"time": time_chunk})
 
 
-def _monthly_static_array(attached: xr.Dataset, *, prefix: str) -> xr.DataArray:
-    arrays = [_entity_coord(attached, f"{prefix}_m{month:02d}") for month in MONTHS]
-    return xr.concat(arrays, dim=xr.IndexVariable("month", np.asarray(MONTHS, dtype=int)))
+def _chunk_width(template: xr.DataArray, dim: str) -> int:
+    """Single chunk width for `dim`, falling back to the full size when unchunked."""
+
+    sizes = template.chunksizes.get(dim)
+    return int(sizes[0]) if sizes else int(template.sizes[dim])
 
 
-def _entity_coord(attached: xr.Dataset, name: str) -> xr.DataArray:
-    return xr.DataArray(attached.coords[name].data, dims=("entity",), coords={"entity": attached.coords["entity"]})
+def _entity_coord(inputs: xr.Dataset, name: str) -> xr.DataArray:
+    return xr.DataArray(inputs.coords[name].data, dims=("entity",), coords={"entity": inputs.coords["entity"]})

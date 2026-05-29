@@ -224,8 +224,8 @@ def create_wet_cooling_kernel(
     params = assumptions or WetCoolingAssumptions()
     return ImpactKernel(
         name="wet_cooling",
-        normalize_inputs=normalize_wet_cooling_climate_inputs,
-        physics_kernel=partial(_evaluate_wet_cooling_kernel, params=params),
+        normalize=normalize_wet_cooling_climate_inputs,
+        physics=partial(_wet_cooling_physics, params=params),
         metadata_columns=WET_METADATA_COLUMNS,
         clips={
             "capacity_factor": (0.0, 1.0),
@@ -235,70 +235,70 @@ def create_wet_cooling_kernel(
     )
 
 
-def _evaluate_wet_cooling_kernel(
-    attached: xr.Dataset,
+def _wet_cooling_physics(
+    inputs: xr.Dataset,
     *,
     params: WetCoolingAssumptions,
 ) -> EvaluationResult:
     wet_bulb = _compute_wet_bulb_temperature(
-        air_temperature_c=attached["air_temperature"],
-        relative_humidity=attached["relative_humidity"],
+        air_temperature_c=inputs["air_temperature"],
+        relative_humidity=inputs["relative_humidity"],
     ).rename("wet_bulb_temperature")
-    saturation_vapor_pressure = _compute_saturation_vapor_pressure(attached["air_temperature"]).rename(
+    saturation_vapor_pressure = _compute_saturation_vapor_pressure(inputs["air_temperature"]).rename(
         "saturation_vapor_pressure_pa"
     )
     actual_vapor_pressure = (
-        attached["relative_humidity"] / 100.0 * saturation_vapor_pressure
+        inputs["relative_humidity"] / 100.0 * saturation_vapor_pressure
     ).rename("actual_vapor_pressure_pa")
     humidity_ratio_out = _humidity_ratio(
         vapor_pressure_pa=saturation_vapor_pressure,
-        surface_pressure_kpa=attached["surface_pressure"],
+        surface_pressure_kpa=inputs["surface_pressure"],
     ).rename("humidity_ratio_out_g_per_kg")
     humidity_ratio_in = _humidity_ratio(
         vapor_pressure_pa=actual_vapor_pressure,
-        surface_pressure_kpa=attached["surface_pressure"],
+        surface_pressure_kpa=inputs["surface_pressure"],
     ).rename("humidity_ratio_in_g_per_kg")
     enthalpy_out = _enthalpy_kj_per_kg(
-        air_temperature_c=attached["air_temperature"],
+        air_temperature_c=inputs["air_temperature"],
         humidity_ratio_g_per_kg=humidity_ratio_out,
     ).rename("enthalpy_out_kj_per_kg")
     enthalpy_in = _enthalpy_kj_per_kg(
-        air_temperature_c=attached["air_temperature"],
+        air_temperature_c=inputs["air_temperature"],
         humidity_ratio_g_per_kg=humidity_ratio_in,
     ).rename("enthalpy_in_kj_per_kg")
     temperature_headroom = _once_through_temperature_headroom(
-        water_temperature_c=attached["water_temperature"],
+        water_temperature_c=inputs["water_temperature"],
         max_discharge_temp_c=params.max_discharge_temp_c,
         max_temp_rise_c=params.max_temp_rise_c,
     ).rename("temperature_headroom_c")
     available_discharge = (
-        attached["discharge"] * (1.0 - params.environmental_flow_fraction)
+        inputs["discharge"] * (1.0 - params.environmental_flow_fraction)
     ).rename("available_discharge_m3_per_s")
     unit_available_discharge = (
-        available_discharge * attached.coords["unit_share_ratio"]
+        available_discharge * inputs.coords["unit_share_ratio"]
     ).rename("unit_available_discharge_m3_per_s")
-    discharge_constraint_applies = (attached.coords["cooling_category"] != "ot_saline").rename(
+    discharge_constraint_applies = (inputs.coords["cooling_category"] != "ot_saline").rename(
         "discharge_constraint_applies"
     )
 
     once_through_withdrawal = _once_through_withdrawal_intensity(
-        thermal_efficiency=attached.coords["thermal_efficiency"],
-        heat_rejection_coefficient=attached.coords["heat_rejection_coefficient"],
+        thermal_efficiency=inputs.coords["thermal_efficiency"],
+        heat_rejection_coefficient=inputs.coords["heat_rejection_coefficient"],
         temperature_headroom_c=temperature_headroom,
         params=params,
     )
     recirculating_withdrawal = _recirculating_withdrawal_intensity(
-        thermal_efficiency=attached.coords["thermal_efficiency"],
-        heat_rejection_coefficient=attached.coords["heat_rejection_coefficient"],
+        thermal_efficiency=inputs.coords["thermal_efficiency"],
+        heat_rejection_coefficient=inputs.coords["heat_rejection_coefficient"],
         humidity_ratio_out=humidity_ratio_out,
         humidity_ratio_in=humidity_ratio_in,
         enthalpy_out=enthalpy_out,
         enthalpy_in=enthalpy_in,
         wet_bulb_temperature_c=wet_bulb,
-        water_temperature_c=attached["water_temperature"],
+        water_temperature_c=inputs["water_temperature"],
         params=params,
     )
-    cooling_physics = attached.coords["cooling_physics"]
+    cooling_physics = inputs.coords["cooling_physics"]
     withdrawal_intensity = xr.where(
         cooling_physics == "once_through",
         once_through_withdrawal,
@@ -307,11 +307,11 @@ def _evaluate_wet_cooling_kernel(
 
     discharge_limited_capacity = np.minimum(
         3600.0 * unit_available_discharge / withdrawal_intensity,
-        attached.coords["mw"],
+        inputs.coords["mw"],
     )
     thermal_only_capacity = xr.where(
         temperature_headroom > 0.0,
-        attached.coords["mw"],
+        inputs.coords["mw"],
         0.0,
     )
     usable_capacity = xr.where(
@@ -319,16 +319,16 @@ def _evaluate_wet_cooling_kernel(
         thermal_only_capacity,
         discharge_limited_capacity,
     ).rename("usable_capacity_mw")
-    capacity_factor = (usable_capacity / attached.coords["mw"]).clip(min=0.0, max=1.0).rename("capacity_factor")
+    capacity_factor = (usable_capacity / inputs.coords["mw"]).rename("capacity_factor")
     capacity_loss = (1.0 - capacity_factor).rename("capacity_loss")
 
     return EvaluationResult(
         data_vars={
-            "water_temperature": attached["water_temperature"],
-            "discharge": attached["discharge"],
-            "air_temperature": attached["air_temperature"],
-            "relative_humidity": attached["relative_humidity"],
-            "surface_pressure": attached["surface_pressure"],
+            "water_temperature": inputs["water_temperature"],
+            "discharge": inputs["discharge"],
+            "air_temperature": inputs["air_temperature"],
+            "relative_humidity": inputs["relative_humidity"],
+            "surface_pressure": inputs["surface_pressure"],
             "wet_bulb_temperature": wet_bulb,
             "saturation_vapor_pressure_pa": saturation_vapor_pressure,
             "actual_vapor_pressure_pa": actual_vapor_pressure,
@@ -340,13 +340,13 @@ def _evaluate_wet_cooling_kernel(
             "available_discharge_m3_per_s": available_discharge,
             "unit_available_discharge_m3_per_s": unit_available_discharge,
             "discharge_constraint_applies": discharge_constraint_applies,
-            "thermal_efficiency_fraction": attached.coords["thermal_efficiency"].rename(
+            "thermal_efficiency_fraction": inputs.coords["thermal_efficiency"].rename(
                 "thermal_efficiency_fraction"
             ),
-            "heat_rejection_coefficient_fraction": attached.coords["heat_rejection_coefficient"].rename(
+            "heat_rejection_coefficient_fraction": inputs.coords["heat_rejection_coefficient"].rename(
                 "heat_rejection_coefficient_fraction"
             ),
-            "evaporation_coefficient_fraction": attached.coords["evaporation_coefficient"].rename(
+            "evaporation_coefficient_fraction": inputs.coords["evaporation_coefficient"].rename(
                 "evaporation_coefficient_fraction"
             ),
             "withdrawal_intensity_m3_per_mwh": withdrawal_intensity,

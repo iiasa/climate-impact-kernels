@@ -17,7 +17,7 @@ from impacts.domain.buildings.chilled_io import (
     load_message_ix_buildings_archetypes,
     load_message_ix_buildings_parametric_runs,
 )
-from impacts.kernel import evaluate_kernel
+from impacts.kernel import evaluate_mapped_kernel
 
 
 class BuildingsChilledContractTest(unittest.TestCase):
@@ -105,21 +105,23 @@ class BuildingsChilledContractTest(unittest.TestCase):
         self.assertEqual(set(normalized.data_vars), {"air_temperature_c"})
         self.assertAlmostEqual(normalized["air_temperature_c"].isel(time=0, lat=0, lon=0).item(), 0.0)
 
-    def test_build_chilled_archetype_mapping_attaches_monthly_solar_columns(self) -> None:
-        mapping = build_chilled_archetype_mapping(self.spatial_units, self.archetypes, self.solar)
+    def test_build_chilled_archetype_mapping_returns_mapping_and_solar(self) -> None:
+        mapping, solar = build_chilled_archetype_mapping(self.spatial_units, self.archetypes, self.solar)
 
         self.assertEqual(mapping["region"].tolist(), ["AFR", "CPA"])
         self.assertEqual(mapping["spatial_unit_id"].tolist(), [0, 1])
-        self.assertAlmostEqual(mapping.loc[0, "solar_vertical_m01"], 101.0)
-        self.assertAlmostEqual(mapping.loc[1, "solar_vertical_m12"], 142.0)
-        self.assertAlmostEqual(mapping.loc[0, "solar_horizontal_m01"], 201.0)
-        self.assertAlmostEqual(mapping.loc[1, "solar_horizontal_m12"], 242.0)
+        self.assertNotIn("solar_vertical_m01", mapping.columns)
+        self.assertEqual(set(solar.data_vars), {"solar_vertical", "solar_horizontal"})
+        self.assertEqual(solar["solar_vertical"].dims, ("month", "lat", "lon"))
+        self.assertAlmostEqual(solar["solar_vertical"].sel(month=1, lat=10.0, lon=100.0).item(), 101.0)
+        self.assertAlmostEqual(solar["solar_horizontal"].sel(month=12, lat=20.0, lon=110.0).item(), 242.0)
 
     def test_validate_archetype_table_rejects_pre_alps2025_proxy_labels(self) -> None:
         legacy = self.archetypes.assign(building_type="residential", urt="tot")
 
         with self.assertRaisesRegex(ValueError, "unsupported building_type values"):
             build_chilled_archetype_mapping(self.spatial_units, legacy, self.solar)
+        # (validation raises before the (mapping, solar) tuple is returned)
 
     @unittest.skipUnless(
         DEFAULT_ARCHETYPE_INPUT_PATH.exists(),
@@ -181,9 +183,9 @@ class BuildingsChilledContractTest(unittest.TestCase):
             heating_efficiency=0.9,
         )
 
-        mapping = build_chilled_archetype_mapping(self.spatial_units, self.archetypes, self.solar)
+        mapping, solar = build_chilled_archetype_mapping(self.spatial_units, self.archetypes, self.solar)
         kernel = create_chilled_kernel(assumptions)
-        daily = evaluate_kernel(kernel, mapping, self.climate, duration="daily")
+        daily = evaluate_mapped_kernel(kernel, mapping, self.climate, duration="daily", gridded_coords=solar)
 
         self.assertEqual(daily["cooling_energy_total"].dims, ("time", "entity"))
         self.assertEqual(daily.sizes["time"], 4)
@@ -191,7 +193,7 @@ class BuildingsChilledContractTest(unittest.TestCase):
         self.assertEqual(daily.coords["spatial_unit_id"].values.tolist(), [0, 1])
         self.assertIn("climate_contract", daily.attrs)
 
-        monthly = evaluate_kernel(kernel, mapping, self.climate, duration="monthly")
+        monthly = evaluate_mapped_kernel(kernel, mapping, self.climate, duration="monthly", gridded_coords=solar)
         self.assertIn("time", monthly.dims)
 
 

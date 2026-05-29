@@ -1,7 +1,7 @@
 """Shared computational core for the impacts package."""
 
 from .baseline import compute_anomaly
-from .evaluation import EvaluationResult, evaluate_gridded_dataset, evaluate_mapped_dataset
+from .evaluation import EvaluationResult
 from .warming import (
     GMTPoint,
     GMTSeries,
@@ -59,8 +59,6 @@ __all__ = [
     "compute_anomaly",
     "compute_running_mean",
     "deterministic_resampling",
-    "evaluate_gridded_dataset",
-    "evaluate_mapped_dataset",
     "grid_cell_area",
     "interpolate_along_warming_level",
     "match_warming_levels",

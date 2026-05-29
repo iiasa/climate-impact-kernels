@@ -3,7 +3,7 @@ import unittest
 import pandas as pd
 import xarray as xr
 
-from impacts.climatecore import evaluate_mapped_dataset
+from impacts.climatecore.evaluation import evaluate_mapped_dataset
 
 
 class EvaluationTest(unittest.TestCase):
@@ -26,10 +26,10 @@ class EvaluationTest(unittest.TestCase):
                 },
                 coords={"time": [0], "lat": [0.5], "lon": [0.5, 1.5]},
             ),
-            normalize_inputs=lambda dataset: dataset.rename({"tas": "air_temperature"}),
-            physics_kernel=lambda attached: xr.Dataset(
+            normalize=lambda dataset: dataset.rename({"tas": "air_temperature"}),
+            physics=lambda inputs: xr.Dataset(
                 data_vars={
-                    "capacity_factor": ((1.0 - (attached["air_temperature"] - 300.0))).rename("capacity_factor"),
+                    "capacity_factor": ((1.0 - (inputs["air_temperature"] - 300.0))).rename("capacity_factor"),
                 }
             ),
             metadata_columns=["UNITID", "mw"],
