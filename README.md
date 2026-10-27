@@ -1,32 +1,39 @@
 # impacts
 
-Climate-impact kernels over a shared, xarray-native core.
+A Python library that estimates how climate change affects thermal power plants
+and building energy use. Each calculation is a kernel, and all kernels share a
+core of xarray operations. Its outputs feed MESSAGE, IIASA's energy system
+model.
 
-`impacts` turns gridded or entity-mapped climate data into physical impact
-variables — thermoelectric power-plant cooling penalties, building cooling
-energy demand — through small, declarative **impact kernels** that share a
-single evaluation engine. It is a library, imported as `impacts.<area>`, not a
-pipeline or CLI: you compose the pieces you need into your own analysis.
+`impacts` computes physical climate impacts from gridded climate data, or from
+climate data sampled at mapped sites (rows of a mapping table, such as
+power-plant units):
 
-## What is an impact kernel?
+- the usable capacity of thermal power units under wet cooling (after Li et al.
+  2025) and dry cooling (after Qin et al. 2023). Usable capacity is the share of
+  a unit's rated maximum output (its nameplate capacity) that it can run at
+  given its cooling-water or air limits. Wet cooling uses river or sea water;
+  dry cooling uses air;
+- building cooling and heating energy intensity with the CHILLED kernel (after
+  Mastrucci et al. 2019 and message-ix-buildings).
 
-An impact kernel is a self-contained description of how one climate impact is
-computed. Each kernel declares three things and nothing more:
+It is a library, imported as `impacts.<area>`, not a pipeline.
 
-- **normalize** — which climate variables it consumes and the units it needs
-  them in;
-- **physics** — how normalized climate is turned into impact variables;
-- **metadata** — which descriptive columns are carried through to the output.
+## Impact kernels
 
-A shared engine (`impacts.kernel`) takes a kernel plus climate inputs and
-evaluates it at the temporal resolution you ask for (`native`, `daily`,
-`monthly`, or `seasonal`). Because the kernel describes only the physics, the
-same definition runs over a regular lat/lon grid or over an arbitrary list of
-mapped entities — power plants, or country × building-archetype combinations —
-without changing the kernel body.
+A kernel (`impacts.engine.Kernel`) describes how one impact is computed. It
+declares:
 
-That separation — declarative physics on top, one reusable engine and a set of
-xarray transforms underneath — is the organizing idea of the package.
+- `inputs`: the climate variables it reads and the unit each must be in;
+- `site_columns`: the per-site values it carries from a mapping table (a site is
+  one row of the mapping table, such as a power-plant unit, or one grid cell);
+- `assumptions`: a dataclass of constants, each with a unit and a source;
+- `physics(climate, sites, assumptions)`: the computation.
+
+The engine selects and converts the inputs, samples them at the sites, runs the
+physics and resamples to the requested duration (`native`, `monthly` or
+`seasonal`). The same kernel runs over a regular grid (`evaluate_gridded`) or a
+list of mapped sites such as power plants (`evaluate_mapped`).
 
 ## Install
 
@@ -43,57 +50,68 @@ uv sync
 ```
 
 Requires Python 3.13+. The repository is named `climate-impact-kernels`; the
-import package is `impacts`. Default input paths (ISIMIP forcing, CHILLED
-inputs) point at the IIASA cluster mount and are overridable through
-environment variables — see [docs/buildings.md](docs/buildings.md) and
-[docs/thermoelectric.md](docs/thermoelectric.md).
+import package is `impacts`.
+
+## Data paths
+
+The package ships no input data and has no default data locations. Every loader
+takes an explicit path; when it is omitted, the path is read from an
+environment variable, and a loader with neither raises.
+
+| Variable | Points at | Read by |
+| --- | --- | --- |
+| `WATXENE_DATA_PATH` | Root of the ISIMIP tree (ISIMIP is the Inter-Sectoral Impact Model Intercomparison Project; this is its bias-adjusted climate data), holding `ISIMIP/ISIMIP3b` and `ISIMIP/ISIMIP3a` in the archive's layout | `isimip3b_paths`, `isimip3a_counterclim_paths`, `reference_climate_paths` |
+| `COMMON_DEFINITIONS_ROOT` | A checkout of [common-definitions](https://github.com/IAMconsortium/common-definitions) | `impacts.climatecore.regions` |
+| `ALPS_DATA_PATH` | Folder with the GAUL 0.5-degree country raster and its lookup CSV, and the EWEMBI vertical and horizontal irradiance climatologies | `load_country_raster`, `load_r12_region_raster`, `load_ewembi_solar_climatology` |
+| `CHILLED_ARCHETYPE_PATH` | The ALPS2025 archetype table `arch_input_reg.csv` of message-ix-buildings | `load_message_ix_buildings_archetypes` |
+| `MESSAGE_R12_YAML_PATH` | The R12 (MESSAGE's twelve world regions) node definitions of message-ix-models (`data/node/R12.yaml`) | `load_r12_region_raster` |
+| `CHILLED_PARAMETRIC_PATH` | A message-ix-buildings parametric-run table (`par_var.csv`); optional | `load_message_ix_buildings_parametric_runs` |
+| `CHILLED_SETPOINT_PATH` | A region cooling-setpoint table; optional, see [docs/buildings.md](docs/buildings.md#region-cooling-setpoints) | `load_region_cooling_setpoints` |
+
+The fleet tables the thermoelectric kernels read derive from a licensed source
+(WEPP) and are not distributed; build them with the `build_*`/`write_*`
+helpers of `impacts.thermoelectric.fleet` from your own copy.
 
 ## Usage
 
-Every analysis has the same shape: build a kernel, then evaluate it against
-climate inputs at a chosen duration. The buildings/CHILLED kernel is the
-worked example (schematic — real runs need the loaders documented below):
+Evaluate a kernel against climate inputs at a chosen duration. The example is
+illustrative, not runnable as written: `daily_climate` and `parameter_grids`
+come from the loaders in [docs/buildings.md](docs/buildings.md).
 
 ```python
-from impacts.domain.buildings.chilled import (
-    ChilledEnergyAssumptions,
-    create_chilled_kernel,
-)
-from impacts.kernel import evaluate_gridded_kernel
+from impacts.buildings.chilled import CHILLED_KERNEL, ChilledEnergyAssumptions
+from impacts.engine import evaluate_gridded
 
-# A kernel is just normalization + physics; it never touches the filesystem.
-kernel = create_chilled_kernel(ChilledEnergyAssumptions(...))
-
-# Evaluate over a gridded climate dataset, aggregated to seasonal means.
-result = evaluate_gridded_kernel(
-    kernel,
+result = evaluate_gridded(
+    CHILLED_KERNEL,
     climate=daily_climate,        # xarray.Dataset, e.g. from impacts.isimip
     parameters=parameter_grids,   # per-cell building / setpoint parameters
-    duration="seasonal",
-)
+    duration="seasonal",          # aggregated to seasonal means
+    assumptions=ChilledEnergyAssumptions(ac_cop=3.5),  # defaults otherwise
+)  # rechunked to CHILLED_CHUNKS unless chunks= says otherwise
 ```
 
-`evaluate_mapped_kernel` is the entity-list counterpart, used when the
-analytical units are intrinsically a list (power plants, or country ×
-archetype) rather than a grid. Both reach the same physics. The loaders that
-assemble `climate` and `parameters` are described in
-[docs/buildings.md](docs/buildings.md) and [docs/workflows.md](docs/workflows.md).
+`evaluate_mapped` is the counterpart for a list of sites, such as power
+plants or spatial units crossed with building archetypes (typical buildings, by
+type, location class and age). [docs/workflows.md](docs/workflows.md)
+shows how the loaders, kernels and aggregations are called together.
 
 ## Architecture
 
-The package is two layers, and dependencies point in one direction only:
-domain physics builds on a shared core, never the reverse.
+The package is two layers: domain physics builds on a shared core.
+import-linter enforces one rule: `impacts.climatecore` does not import from the
+domain packages, `impacts.engine` or `impacts.isimip`.
 
 ```mermaid
 flowchart TD
-    subgraph domain["impacts.domain — physics, mappings, RIME-X adapters"]
+    subgraph domain["impacts.thermoelectric, impacts.buildings: physics, mappings, warming-level summaries"]
         thermo["thermoelectric"]
         buildings["buildings (CHILLED)"]
     end
 
-    kernel["impacts.kernel<br/>evaluation contract"]
-    isimip["impacts.isimip<br/>ISIMIP3b ingress"]
-    core["impacts.climatecore<br/>xarray-native mechanics"]
+    kernel["impacts.engine<br/>kernel definition and evaluation"]
+    isimip["impacts.isimip<br/>ISIMIP3b input loading"]
+    core["impacts.climatecore<br/>xarray operations"]
 
     domain --> kernel
     domain --> isimip
@@ -101,80 +119,84 @@ flowchart TD
     isimip --> core
 ```
 
-`impacts.climatecore` sits at the bottom: reusable, domain-agnostic xarray
-mechanics — baselines, warming-level matching and response surfaces, region
-aggregation, and temporal / spatial / unit / statistical transforms. The rule
-that it must not import from any domain module, `impacts.kernel`, or
-`impacts.isimip` is enforced by `import-linter`, which keeps the core
-independently extractable. See [docs/architecture.md](docs/architecture.md) for
-the boundary contract and the extraction recovery path.
+`impacts.climatecore` sits at the bottom: xarray operations that do not depend on
+any domain, for warming-level assignment and pooling, region aggregation, and
+temporal, spatial and unit transforms. It must not import from the domain modules,
+`impacts.engine` or `impacts.isimip`; `import-linter` enforces this. See
+[docs/architecture.md](docs/architecture.md).
 
 ### Evaluation flow
 
-Within a domain, every evaluation follows the same path. The kernel supplies
-the first two steps; the engine supplies the rest:
+Every evaluation follows the same path:
 
 ```mermaid
 flowchart LR
-    inputs["climate inputs<br/>grid or mapped entities"] --> norm["normalize<br/>(kernel)"]
+    inputs["climate inputs<br/>grid or mapped sites"] --> norm["select, convert units, sample sites<br/>(engine, from the kernel's inputs)"]
     norm --> phys["physics<br/>(kernel)"]
-    phys --> dur["duration<br/>native · daily · monthly · seasonal"]
+    phys --> dur["duration<br/>native · monthly · seasonal"]
     dur --> out["impact dataset"]
 ```
 
 ## Domains
 
-**`impacts.domain.thermoelectric`** — thermo-electric power-plant impacts:
-unit-to-grid mapping, cooling classification, wet- and dry-cooling physics
-kernels, and aggregation from plant level to countries or MESSAGE R12 regions.
-The derived mapping and cooling artifacts are not distributed with the
-repository — they derive from license-restricted WEPP/PLATTS source data — so
-regenerate them with the `build_*`/`write_*` helpers or supply your own.
-Modules, artifacts, and method provenance are in
-[docs/thermoelectric.md](docs/thermoelectric.md).
+`impacts.thermoelectric`: thermal power-plant cooling. Unit-to-grid
+mapping, cooling classification, the wet- and dry-cooling kernels, aggregation
+to countries or MESSAGE R12 regions, and the methods for siting new plants. See
+[docs/thermoelectric.md](docs/thermoelectric.md) and
+[docs/siting.md](docs/siting.md).
 
-**`impacts.domain.buildings`** — building cooling-energy demand via the CHILLED
-pathway, targeting the ALPS2025 archetype contract. The kernel (`chilled.py`)
-is kept separate from its file I/O (`chilled_io.py`) and path configuration
-(`chilled_config.py`) so the physics can be tested and reused independently of
-the operational scaffolding. See [docs/buildings.md](docs/buildings.md).
+`impacts.buildings`: building cooling and heating energy intensity with the
+CHILLED kernel on the ALPS2025 archetypes. The kernel (`chilled.py`) is kept
+apart from the code that loads its input files (`archetypes.py`) and its path
+configuration (`_config.py`).
+See [docs/buildings.md](docs/buildings.md).
 
-Both domains expose **RIME-X adapters** that reshape kernel outputs into the
-xarray fields consumed by [RIME-X](https://github.com/iiasa/rimeX), IIASA's
-probabilistic emulator for regional climate indicators — attaching
-warming-level coordinates and building quantile surfaces. The generic
-warming-level attachment lives in `impacts.climatecore`; the domain adapters
-(`thermoelectric/rimex.py`, `buildings/rimex.py`) add the domain-specific
-reshaping.
+Both domains build warming-level summaries for
+[RIME-X](https://github.com/iiasa/rimeX), IIASA's emulator of regional climate
+impacts by warming level. Outputs are pooled (combined before taking
+statistics) over the samples in each warming-level bin and summarised per
+region. A sample is one year of one GCM (global climate model) under one
+scenario. A warming-level bin is the range of years whose warming is closest to
+one global warming level, such as 1.5 or 2 K above pre-industrial. The
+warming-level assignment and pooling live in `impacts.climatecore`; the
+domain modules (`thermoelectric/warming_levels.py`,
+`buildings/warming_levels.py`, `thermoelectric/siting/rime.py`) do the
+domain-specific reshaping.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — the two-layer structure and
-  the `climatecore` ↓ `domain` boundary contract.
-- [docs/climatecore.md](docs/climatecore.md) — the shared core's layout and
-  entry points.
-- [docs/thermoelectric.md](docs/thermoelectric.md) — thermoelectric modules,
-  artifacts, and provenance.
-- [docs/buildings.md](docs/buildings.md) — the CHILLED kernel, its inputs, and
-  configuration.
-- [docs/workflows.md](docs/workflows.md) — the recurring cross-module
-  workflows.
+- [docs/architecture.md](docs/architecture.md): the module map and the import
+  rule for `climatecore`.
+- [docs/climatecore.md](docs/climatecore.md): the shared core and how
+  kernels are evaluated.
+- [docs/thermoelectric.md](docs/thermoelectric.md): the wet and dry kernels,
+  equation by equation.
+- [docs/siting.md](docs/siting.md): the methods for siting new plants.
+- [docs/buildings.md](docs/buildings.md): the CHILLED kernel, equation by
+  equation, and its inputs.
+- [docs/assumptions.md](docs/assumptions.md): units, named constants and the
+  assumptions register.
+- [docs/workflows.md](docs/workflows.md): how the functions are called
+  together.
 
 ## Development
 
 ```sh
 uv sync                  # editable install + dev dependencies
 uv run pytest            # test suite
-uv run lint-imports      # verify the core / domain boundary contract
+uv run lint-imports      # check that climatecore imports nothing from the domains
 ```
 
-Tests mirror the package layout: `tests/climatecore/` for the shared core, and
-`tests/test_{mapping,cooling,wet,dry,aggregation,isimip,buildings,recovery,rimex}.py`
-for the domains.
+The tests mirror the package: `tests/climatecore/`, `tests/thermoelectric/`
+(with `siting/`) and `tests/buildings/` hold a file per module, and
+`tests/test_isimip.py` and `tests/test_engine.py` cover the two top-level modules.
+`tests/regression/` holds end-to-end tests: they run the library on small
+made-up inputs and compare each result with a stored copy of an earlier result;
+see its [README](tests/regression/README.md).
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0; see [LICENSE](LICENSE).
 
 ## Citation
 
@@ -182,13 +204,16 @@ The kernels implement methods from upstream scientific work; results derived
 from a kernel should cite the underlying method paper in addition to this
 software:
 
-- **CHILLED** (building cooling demand) —
+- CHILLED (building cooling demand): Mastrucci et al. (2019); see
+  [docs/buildings.md](docs/buildings.md). The kernel code is adapted from
   [iiasa/message-ix-buildings](https://github.com/iiasa/message-ix-buildings)
-  and the references in [docs/buildings.md](docs/buildings.md).
-- **Thermoelectric cooling** — Li et al. (2025) and Qin et al. (2023); see
-  [docs/thermoelectric.md](docs/thermoelectric.md).
-- **RIME-X** — [iiasa/rimeX](https://github.com/iiasa/rimeX).
+  (Apache License 2.0).
+- Thermoelectric cooling: Li et al. (2025),
+  <https://doi.org/10.1038/s41893-025-01692-9>, for wet cooling, and Qin et al.
+  (2023), <https://doi.org/10.1038/s44221-023-00120-6>, for dry cooling; see
+  [docs/thermoelectric.md](docs/thermoelectric.md). The wet-cooling code is
+  adapted from the authors' released code, Li & Qin,
+  <https://doi.org/10.5281/zenodo.17369544> (CC BY 4.0).
+- RIME-X: [iiasa/rimeX](https://github.com/iiasa/rimeX).
 
-For software-level citation, point at
-<https://github.com/iiasa/climate-impact-kernels>. A formal citation entry will
-be added when an `impacts`-specific paper or DOI exists.
+For the software, cite <https://github.com/iiasa/climate-impact-kernels>.

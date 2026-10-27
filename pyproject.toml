@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "impacts"
-version = "0.1.14"
+version = "0.1.27"
 description = "Domain-oriented climate-impact preprocessing utilities with a shared xarray-native core."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -20,7 +20,6 @@ dependencies = [
     "pandas>=2.2",
     "pyarrow>=16.0",
     "pyyaml>=6.0",
-    "scipy>=1.11",
     "xarray>=2024.6.0",
 ]
 
@@ -33,6 +32,7 @@ Issues = "https://github.com/iiasa/climate-impact-kernels/issues"
 dev = [
     "import-linter>=2.0",
     "pytest>=8.0",
+    "ruff>=0.17",
 ]
 
 [tool.pytest.ini_options]
@@ -40,6 +40,9 @@ testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["impacts*"]
+
+[tool.setuptools.package-data]
+"impacts.buildings" = ["data/*.csv"]
 
 [tool.importlinter]
 root_packages = ["impacts"]
@@ -49,7 +52,25 @@ name = "impacts.climatecore does not depend on impacts domain modules"
 type = "forbidden"
 source_modules = ["impacts.climatecore"]
 forbidden_modules = [
-    "impacts.domain",
+    "impacts.thermoelectric",
+    "impacts.buildings",
     "impacts.isimip",
-    "impacts.kernel",
+    "impacts.engine",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # Formatting is not enforced, so long lines are tolerated.
+    "E501",
+    # Physics comments and docstrings use unit and symbol characters (x, rho).
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # `type X = ...` creates a TypeAliasType at runtime; keep the TypeAlias form.
+    "UP040",
 ]

@@ -9,26 +9,19 @@ wheels/
 .mypy_cache/
 .ruff_cache/
 .coverage
-.claude/
 htmlcov/
-AGENTS.md
 
 # Virtual environments
 .venv
 
-# Local staging (UniCC SLURM scripts, smoke tests, ad-hoc drivers)
+# Local staging
 _staging/
 
-# Operational driver scripts and validation helpers (local-only until
-# parametrized for public reuse — see ticket #588).
+# Local scripts and validation helpers
 scripts/
 validation/
 
-# Codex scratch dir
-.codex
-.codex/
-
-# Licensed local-only WEPP/PLATTS-derived artifacts
+# Fleet-derived artifacts (licensed source data, not distributed)
 data/country_rollup.parquet
 data/imputed_wet_unit_cell_mapping.parquet
 data/location_cell_mapping.parquet

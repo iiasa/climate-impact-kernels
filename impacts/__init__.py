@@ -1,6 +1,6 @@
 """Climate-impact kernels over a shared xarray-native core.
 
-Public surfaces are imported from their subpackages directly:
-``impacts.climatecore``, ``impacts.domain.thermoelectric``,
-``impacts.domain.buildings``, ``impacts.kernel``, ``impacts.isimip``.
+The public functions are imported from their subpackages directly:
+``impacts.climatecore``, ``impacts.thermoelectric``,
+``impacts.buildings``, ``impacts.engine``, ``impacts.isimip``.
 """

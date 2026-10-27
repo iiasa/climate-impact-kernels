@@ -1,126 +1,166 @@
 # Buildings
 
-`impacts.domain.buildings` currently centers on the CHILLED pathway. The
-implementation is split across three files so the kernel can be reasoned
-about, tested, and re-used independently of the operational I/O scaffolding:
+`impacts.buildings` computes daily cooling and heating energy intensity of
+building archetypes with the CHILLED kernel. A kernel is one impact calculation:
+the climate inputs it reads, its constants and its equations. A building
+archetype is a typical building, by type, location class and age, used to
+represent the stock. The method is the variable degree-day (VDD) method of
+Mastrucci et al. (2019),
+<https://doi.org/10.1016/j.enbuild.2019.01.015>, and the code is adapted from
+[message-ix-buildings](https://github.com/iiasa/message-ix-buildings)
+(`message_ix_buildings/chilled/functions/buildings_funcs_grid.py`, Apache
+License 2.0). Heating applies the same balance to heating degree-days; it is
+message-ix-buildings' extension of the method, not part of the 2019 paper.
 
 | Module | Owns |
 | --- | --- |
-| `impacts.domain.buildings.chilled` | Kernel contract: physics, climate-input normalizer, `ChilledEnergyAssumptions`, `create_chilled_kernel`. |
-| `impacts.domain.buildings.chilled_io` | File I/O: archetype/parametric/solar/region loaders, validators, gridded-parameter and archetype-mapping builders. |
-| `impacts.domain.buildings.chilled_config` | Operational path defaults. The only file in `impacts.domain.buildings` that reads from `os.environ`. |
-| `impacts.domain.buildings.country` | Country-label raster + generic area-weighted entity→country reduction. Reusable by any gridded buildings analysis that needs country aggregation. |
-| `impacts.domain.buildings.rimex` | CHILLED → RIME-X shape adapter: matrix-filename parsing, CHILLED-specific reduction map, metadata expansion. Composes the `country` primitives. |
+| `chilled.py` | The physics, `ChilledEnergyAssumptions`, `CHILLED_KERNEL`, `CHILLED_REGION_SETPOINT_KERNEL` and `chilled_energy`. Reads no files. |
+| `archetypes.py` | Loaders and validators for the archetype, parametric-run, setpoint, solar and region inputs; the gridded-parameter and archetype-mapping builders. |
+| `_config.py` | Input paths from environment variables; the only module here that reads `os.environ`. |
+| `regions.py` | Country-label raster, area-weighted site-to-country reduction, and the reshaping of CHILLED outputs for warming-level summaries. |
+| `warming_levels.py` | Energy-intensity summaries by warming level. |
 
-The kernel itself never touches the filesystem. Callers compose it with
-`impacts.kernel.evaluate_mapped_kernel` (mapped DataFrame inputs) or
-`impacts.kernel.evaluate_gridded_kernel` (gridded parameter Dataset
-inputs); both reach the same physics.
+## Equations and code
 
-## Current Contract
+The physics is `chilled_physics` in `impacts/buildings/chilled.py`. The source
+paper is not cited by equation number here; each step is named by the
+message-ix-buildings function it follows. Variable degree-days are degree-days
+computed against a balance temperature that depends on the building. The
+balance temperature is the outdoor temperature at which a building needs neither
+heating nor cooling. COP is the coefficient of performance of an air
+conditioner: cooling delivered per unit electricity.
 
-The current implementation targets the ALPS2025 archetype contract only.
+| Step | message-ix-buildings | `chilled_physics` |
+| --- | --- | --- |
+| Transmission heat-loss coefficient `H_tr = U A_env`, W K-1 | `calc_H_tr` | `h_transmission` |
+| Ventilation coefficients `H_v = 1200 V ach / 3600`, windows closed and open, W K-1 | `calc_H_v_cl`, `calc_H_v_op` | `h_ventilation_closed`, `h_ventilation_open` |
+| Solar gain through glazing and roof, W | `calc_gn_sol_tot` | `solar_gain` |
+| Heating balance temperature `T_sp,h - gains / (H_tr + H_v,cl)` | `calc_t_bal_h` | `t_balance_heating` |
+| Cooling balance temperature `T_sp,c - gains / (H_tr + H_v,cl)` | `calc_t_bal_c` | `t_balance_cooling` |
+| Maximum comfortable outdoor temperature `T_max,c - gains / (H_tr + H_v,op)` | `calc_t_max_c` | `t_max_cooling` |
+| Heating degree-days `max(T_bal,h - T_out, 0)` | `calc_vdd_h` | `vdd_h` |
+| Cooling degree-days above `T_max,c` | `calc_vdd_tmax_c` | `vdd_tmax_c` |
+| AC days `Nd` (`T_out > T_max,c`) and fan days `Nf` (`T_out > T_bal,c`) | `calc_Nd`, `calc_Nf` | `Nd`, `Nf` |
+| Cooling need `(H_tr + H_v,cl) f_c (VDD + (T_max,c - T_bal,c) Nd)` | `Q_c_tmax` | `cooling_need` |
+| Heating need `(H_tr + H_v,cl) f_h VDD_h` | `Q_h` | `heating_need` |
+| AC energy `Q_c / COP` | `calc_E_c_ac` | `cooling_energy_ac` |
+| Fan energy `f_f P_fan Nf / A_fan` | `calc_E_c_fan` | `cooling_energy_fan` |
+| Heating energy `Q_h / eta` | `calc_E_h` | `heating_energy` |
 
-Important assumptions:
+The roof term of the solar gain carries the external surface resistance
+`R_se = 0.04 m2 K W-1` (`EXTERNAL_SURFACE_RESISTANCE_M2_K_PER_W`). Balance
+temperatures are monthly, from the monthly solar climatology; degree-days and
+day counts are evaluated per day against them. Outputs are MJ m-2 day-1, so
+monthly and seasonal outputs are means of daily values rather than monthly
+sums as in message-ix-buildings. `cooling_energy_total` is AC plus fan energy.
 
-- `arch_input_reg.csv` is consumed with `building_type`, `urt`, `arch`, and
-  `region` as first-class dimensions
-- the explicit cross-combination rows in the source table are treated as
-  upstream modeling assumptions, not repaired back into older proxy rules
-- climate input is daily near-surface air temperature
-- solar enters as a fixed EWEMBI monthly `(month, lat, lon)` climatology; the
-  kernel reads it as a `(month, entity)` coordinate — the gridded path stacks
-  it, the mapped path samples it via `gridded_coords`
-- output duration is part of kernel evaluation: `native`, `daily`, `monthly`,
-  or `seasonal`
-- `seasonal` outputs can remain dask-backed until the caller materializes or
-  writes them
+The default equipment and setpoint values are the fields of
+`ChilledEnergyAssumptions`, each cited to the message-ix-buildings constant it
+takes. `ChilledEnergyAssumptions.from_parametric_row` builds them from a row of
+the message-ix-buildings parametric-run table (`par_var.csv`).
 
-## Main Entry Points
+## Inputs
 
-From `impacts.domain.buildings.chilled`:
+- Climate: daily near-surface air temperature `tas`, converted to °C by the
+  engine. Load it from `impacts.isimip` with `target_frequency="native"`;
+  monthly means would bias the degree-days.
+- Archetypes: the message-ix-buildings ALPS2025 table `arch_input_reg.csv`,
+  read and validated by `load_message_ix_buildings_archetypes`.
+  `building_type` (`sfh`, `mfh`), `urt` (`rur`, `urb`), `arch` (`s1`, `s2`, `s3`,
+  `s51`, `s52`) and `region` are dimensions; every row of the table is taken as
+  given, including its cross combinations of building type and urban/rural class.
+- Solar: the EWEMBI monthly vertical and horizontal irradiance climatologies
+  (`load_ewembi_solar_climatology`), carried to the kernel as a
+  `(month, entity)` site value.
+- Regions: an R12 (MESSAGE's twelve world regions) region raster from the GAUL country raster, its lookup CSV and
+  the MESSAGE R12 node definitions (`load_r12_region_raster`).
+- Parametric runs, optional: `load_message_ix_buildings_parametric_runs`, which
+  raises when neither a path nor `CHILLED_PARAMETRIC_PATH` is given.
 
-- `normalize_chilled_climate_inputs` — selects, renames, and unit-normalizes
-  the required climate inputs.
-- `ChilledEnergyAssumptions` — equipment and setpoint parameters; build from
-  a parametric-run row with `ChilledEnergyAssumptions.from_parametric_row`.
-- `create_chilled_kernel(assumptions, *, entity_chunk=10_000, time_chunk=365)`
-  — builds the `ImpactKernel` instance for CHILLED evaluation. The chunk
-  sizes control the dask rechunk at kernel entry and are surfaced as
-  explicit args so a calling script can tune them per-run (e.g. via env
-  vars) without mutating module state.
+Every loader takes an explicit path; the environment variables that stand in
+for those paths are listed in the [README](../README.md#data-paths).
 
-From `impacts.domain.buildings.chilled_io`:
+## Region cooling setpoints
 
-- `load_message_ix_buildings_archetypes` — loads and validates the ALPS2025
-  archetype table.
-- `load_message_ix_buildings_parametric_runs` — loads parametric-run
-  assumptions when an upstream workflow provides `CHILLED_PARAMETRIC_PATH`.
-- `load_ewembi_solar_climatology`, `load_r12_region_raster` — supporting
-  inputs for the gridded path.
-- `build_chilled_parameter_grids` — builds the `(lat, lon)` parameter
-  Dataset (with solar carried as `(month, lat, lon)`) consumed by
-  `evaluate_gridded_kernel`.
-- `build_chilled_archetype_mapping` — explodes spatial units against the
-  archetype table; returns `(mapping, solar)` — the mapping plus the
-  `(month, lat, lon)` solar climatology to pass as `gridded_coords`.
-- `validate_archetype_table` — exposed so callers can validate ad-hoc
-  archetype tables outside the loader path.
+By default the kernel uses the scalar `cooling_setpoint_c` and `cooling_max_c`
+of `ChilledEnergyAssumptions` everywhere. Region-specific setpoints are opt-in,
+from a table the caller supplies; none ships with the package.
 
-From `impacts.kernel`:
+The table is a CSV with one row per region and the columns `region` (matching
+the archetype table's `region`), `cooling_setpoint_c` and `cooling_max_c`, in
+°C. `load_region_cooling_setpoints(path)` reads it, or reads the file named by
+`CHILLED_SETPOINT_PATH` when no path is given, and raises for a missing column
+or a duplicated region. Pass the result as `setpoints=` to:
 
-- `evaluate_mapped_kernel(kernel, mapping, climate, duration, *, gridded_coords=None)`
-  — mapped-entity evaluation. `gridded_coords` carries gridded fields (e.g. the
-  CHILLED solar climatology) to sample per entity. Used by the CHILLED test
-  suite and any analysis where the analytical units are intrinsically a list
-  (e.g. country × archetype).
-- `evaluate_gridded_kernel(kernel, climate, parameters, duration)` —
-  gridded evaluation. Used by the production matrix runner. Output is
-  entity-stacked: `(time, entity)` for `native`/`daily` (and
-  `(season, year, entity)` after seasonal aggregation), with `lat`/`lon`
-  carried as coordinates on `entity`. The production runner calls
-  `reset_index("entity")` to write a `(time, lat, lon)` product.
+- `build_chilled_parameter_grids`, which rasterises the two columns by region
+  for `evaluate_gridded`; or
+- `build_chilled_archetype_mapping` or `chilled_energy`, which join them onto
+  the mapping on `region`. The mapped path then evaluates
+  `CHILLED_REGION_SETPOINT_KERNEL`, which carries the two columns as site values.
 
-Both primitives present the same `(time, entity)` shape to the physics
-kernel internally; the kernel body is shape-agnostic.
+A region missing from the table, or a missing value, falls back to the scalar
+on `ChilledEnergyAssumptions`. The setpoint is fixed per region, not adaptive to
+outdoor temperature.
 
-## Environment And Input Paths
+The output's `cooling_setpoint_c` and `cooling_max_c` attributes then describe
+per-region values, and the matching `_source` attributes name the table file
+and the scalar fallback. The loader binds that source information to the region-to-value
+pairs it read: sorting the table or evaluating a subset of the mapping keeps it,
+while a table, mapping column or grid edited afterwards is reported as of
+unrecorded source.
 
-Path defaults live in `impacts.domain.buildings.chilled_config` and are
-derived from:
+## Entry points
 
-- `WATXENE_PATH`
-- `CHILLED_ARCHETYPE_PATH`
-- `CHILLED_PARAMETRIC_PATH`
-- `MESSAGE_R12_YAML_PATH`
+From `impacts.buildings.chilled`:
 
-These defaults are operational conveniences. Upstream workflows remain
-responsible for choosing scenario/run definitions and providing any
-non-default inputs; every loader accepts an explicit `path` argument.
+- `CHILLED_KERNEL`: reads daily `tas` in °C.
+- `CHILLED_REGION_SETPOINT_KERNEL`: the same kernel, whose mapped path also
+  carries `cooling_setpoint_c`/`cooling_max_c`. The gridded path reads them from
+  the parameter grid whenever present, so the distinction is mapped-path only.
+- `chilled_energy(spatial_units, archetypes, solar_climatology, climate, duration, *, setpoints=None, assumptions=None, chunks=None, ...)`:
+  builds the archetype mapping and evaluates it in one call.
+- `CHILLED_CHUNKS = {"time": 365, "entity": 10_000}`: the kernels' chunk
+  default. `evaluate_mapped`, `evaluate_gridded` and `chilled_energy` rechunk to
+  it when `chunks=None`; pass other widths, or `{}` to keep the loader's chunks.
+- `CHILLED_SITE_ID_COLUMN`: a mapping row has no identifier of its own, so
+  `chilled_energy` numbers the rows under this column and passes it as
+  `site_id_column`. A direct caller of `evaluate_mapped` does the same.
 
-The kernel-entry dask chunk sizes are also tunable via env vars by the
-calling script (e.g. `run_chilled_diag.py` reads
-`CHILLED_KERNEL_ENTITY_CHUNK` and `CHILLED_KERNEL_TIME_CHUNK` and forwards
-them as `create_chilled_kernel(..., entity_chunk=..., time_chunk=...)`).
-The kernel module itself does not read environment variables.
+From `impacts.buildings.archetypes`:
 
-## Scope Boundaries
+- `build_chilled_parameter_grids(region_raster, archetypes, solar, *, building_type, urt, vintage, setpoints=None)`:
+  the `(lat, lon)` parameter Dataset for one archetype combination, consumed by
+  `evaluate_gridded`.
+- `build_chilled_archetype_mapping(spatial_units, archetypes, solar, *, setpoints=None)`:
+  spatial units crossed with the archetypes of their region; returns the
+  mapping and the solar climatology to pass as `gridded_coords`.
+- `validate_archetype_table`: the archetype-table checks, for tables built
+  outside the loader.
 
-In scope for `impacts.domain.buildings`:
+`evaluate_gridded` returns `(time, entity)` outputs (`(season, year, entity)`
+when seasonal) with `lat`/`lon` as coordinates on `entity`;
+`reset_index("entity")` gives a `(time, lat, lon)` layout.
 
-- archetype-table validation
-- mapping archetypes onto spatial units
-- climate normalization for CHILLED
-- kernel definition and the physics it expresses
-- kernel-entry chunking strategy
+## Country aggregation and warming-level summaries
 
-Out of scope:
+`aggregate_chilled_to_country` (`regions.py`) labels each grid cell (site) with its
+country from the GAUL raster (`load_country_raster`, column `ISO3` by default)
+and reduces all four outputs it carries (`cooling_energy_total`,
+`heating_energy`, `Nd`, `Nf`) as cell-area-weighted means; none is summed.
 
-- scenario assembly
-- end-to-end pipeline orchestration
-- raster generation beyond the validated upstream bundle
-- implicit inference of parametric-run tables
-- production-runner orchestration (lives in `scripts/`)
+`buildings_warming_level_summaries` (`warming_levels.py`) pools the country
+seasonal intensities over every sample (one year of one GCM, a global climate
+model, under one scenario) in each 0.1 K warming-level bin (the range of years whose
+warming is closest to one level of global warming above pre-industrial) and reports, per R12 region, archetype, urban/rural class and
+season, the mean, standard deviation, 10th/50th/90th percentile and sample
+count. Countries are aggregated to R12 by a weighted mean over the members with
+data; the caller supplies the weights. The `urt="total"` class is the
+unweighted mean of the rural and urban classes. Annual summaries sum the seasonal rate
+times the season length (MJ m-2 yr-1).
 
-If a workflow depends on `par_var.csv`, it must pass
-`CHILLED_PARAMETRIC_PATH` explicitly.
+## Scope
+
+In scope: archetype-table validation, mapping archetypes onto spatial units, the
+kernel and its chunking. Out of scope: scenario assembly, running the steps of
+a run in order, raster generation beyond the input files above, and inference of
+parametric-run tables.

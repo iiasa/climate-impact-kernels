@@ -1,46 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from functools import cache
 import csv
 import io
 import os
-from pathlib import Path
 import re
+from collections.abc import Mapping, Sequence
+from functools import cache
+from pathlib import Path
 from typing import Literal, TypeAlias
 
 import xarray as xr
 
 Reduction: TypeAlias = Literal["sum", "weighted_mean"]
 
-
-@dataclass(frozen=True, slots=True)
-class CountryGeometrySource:
-    """Registered external country-boundary source."""
-
-    name: str
-    source: str
-    format: str
-    source_url: str
-    dataset_slug: str
-    notes: str
-
-
-COUNTRY_GEOMETRY_SOURCES: tuple[CountryGeometrySource, ...] = (
-    CountryGeometrySource(
-        name="natural_earth_admin_0_countries_110m",
-        source="Natural Earth",
-        format="shapefile",
-        source_url="https://www.naturalearthdata.com/downloads/110m-cultural-vectors/",
-        dataset_slug="ne_110m_admin_0_countries",
-        notes=(
-            "Registered as the default lightweight global country-boundary source for "
-            "future grid-to-country reductions. Geometry files are not vendored in this "
-            "repository; the registry stores the canonical upstream source metadata."
-        ),
-    ),
-)
 
 _MESSAGE_R12_ALIASES = {
     "ANTIGUA & BARBUDA": "Antigua and Barbuda",
@@ -85,12 +57,6 @@ _MESSAGE_R12_COUNTRY_PATH = Path(
 )
 
 
-def list_country_geometry_sources() -> tuple[CountryGeometrySource, ...]:
-    """Return registered country-boundary sources."""
-
-    return COUNTRY_GEOMETRY_SOURCES
-
-
 def common_definitions_root() -> Path:
     """Return the configured common-definitions repository root."""
 
@@ -111,7 +77,7 @@ def common_definitions_root() -> Path:
 
 @cache
 def message_r12_region_labels() -> dict[str, str]:
-    """Return MESSAGEix-GLOBIOM 2.1 R12 code -> label mapping."""
+    """Return the MESSAGEix-GLOBIOM 2.1 R12 region code -> label mapping."""
 
     code_yaml = (common_definitions_root() / _MESSAGE_R12_CODE_PATH).read_text()
     return dict(
@@ -124,7 +90,7 @@ def message_r12_region_labels() -> dict[str, str]:
 
 @cache
 def message_r12_country_to_region() -> dict[str, str]:
-    """Return canonical country -> R12 region mapping."""
+    """Return the country name -> R12 region code mapping."""
 
     label_to_code = {label: code for code, label in message_r12_region_labels().items()}
     mapping: dict[str, str] = {}
@@ -185,38 +151,38 @@ def resolve_region_labels(
             raise ValueError(f"unsupported region set: {region_set!r}")
 
 
-def aggregate_entity_dataarray(
+def aggregate_site_dataarray(
     values: xr.DataArray,
     region_labels: Sequence[object],
     *,
     reduction: Reduction,
-    entity_dim: str = "entity",
+    site_dim: str = "entity",
     region_dim: str = "region",
     weights: xr.DataArray | Sequence[float] | None = None,
 ) -> xr.DataArray:
-    """Aggregate an entity-indexed array to named regions."""
+    """Aggregate an array with one value per site (``site_dim``) to named regions."""
 
-    if entity_dim not in values.dims:
-        raise ValueError(f"{entity_dim!r} is not a dimension of the input values")
+    if site_dim not in values.dims:
+        raise ValueError(f"{site_dim!r} is not a dimension of the input values")
 
     labels = _labels_dataarray(
         region_labels=region_labels,
-        entity_coord=values.coords[entity_dim],
-        entity_dim=entity_dim,
+        entity_coord=values.coords[site_dim],
+        site_dim=site_dim,
         region_dim=region_dim,
     )
     labeled = values.assign_coords({region_dim: labels})
 
     match reduction:
         case "sum":
-            return labeled.groupby(region_dim).sum(dim=entity_dim)
+            return labeled.groupby(region_dim).sum(dim=site_dim, min_count=1)
         case "weighted_mean":
             if weights is None:
                 raise ValueError("weights are required for weighted_mean aggregation")
             weight_values = _weights_dataarray(
                 weights=weights,
-                entity_coord=values.coords[entity_dim],
-                entity_dim=entity_dim,
+                entity_coord=values.coords[site_dim],
+                site_dim=site_dim,
                 region_dim=region_dim,
                 region_labels=region_labels,
             )
@@ -224,43 +190,43 @@ def aggregate_entity_dataarray(
                 values=values,
                 weights=weight_values,
                 labels=labels,
-                entity_dim=entity_dim,
+                site_dim=site_dim,
                 region_dim=region_dim,
             )
         case _:
             raise ValueError(f"unsupported reduction: {reduction!r}")
 
 
-def aggregate_entity_dataset(
+def aggregate_site_dataset(
     dataset: xr.Dataset,
     region_labels: Sequence[object],
     *,
     variable_reductions: Mapping[str, Reduction],
-    entity_dim: str = "entity",
+    site_dim: str = "entity",
     region_dim: str = "region",
     weights: xr.DataArray | Sequence[float] | None = None,
 ) -> xr.Dataset:
-    """Aggregate entity-indexed dataset variables to named regions."""
+    """Aggregate the dataset variables that have one value per site (``site_dim``) to named regions."""
 
-    if entity_dim not in dataset.dims:
-        raise ValueError(f"{entity_dim!r} is not a dimension of the input dataset")
+    if site_dim not in dataset.dims:
+        raise ValueError(f"{site_dim!r} is not a dimension of the input dataset")
 
     aggregated: dict[str, xr.DataArray] = {}
     for name, variable in dataset.data_vars.items():
-        if entity_dim not in variable.dims:
+        if site_dim not in variable.dims:
             aggregated[name] = variable
             continue
 
         reduction = variable_reductions.get(name)
         if reduction is None:
-            continue
+            raise ValueError(f"no reduction given for site variable {name!r}")
 
         variable_weights = weights if reduction == "weighted_mean" else None
-        aggregated[name] = aggregate_entity_dataarray(
+        aggregated[name] = aggregate_site_dataarray(
             variable,
             region_labels,
             reduction=reduction,
-            entity_dim=entity_dim,
+            site_dim=site_dim,
             region_dim=region_dim,
             weights=variable_weights,
         )
@@ -307,32 +273,35 @@ def _aggregate_weighted_mean(
     values: xr.DataArray,
     weights: xr.DataArray,
     labels: xr.DataArray,
-    entity_dim: str,
+    site_dim: str,
     region_dim: str,
 ) -> xr.DataArray:
-    weighted_values = (values * weights).assign_coords({region_dim: labels})
-    numerator = weighted_values.groupby(region_dim).sum(dim=entity_dim)
-    denominator = weights.groupby(region_dim).sum(dim=entity_dim)
-
-    if bool((denominator <= 0).any()):
+    if bool((weights.groupby(region_dim).sum(dim=site_dim) <= 0).any()):
         raise ValueError("total weight must be positive for every region")
 
-    return numerator / denominator
+    # A site with no value carries no weight, and a region with no weight has
+    # no mean.
+    valid_weights = weights.where(values.notnull()).assign_coords({region_dim: labels})
+    weighted_values = (values * valid_weights).assign_coords({region_dim: labels})
+    numerator = weighted_values.groupby(region_dim).sum(dim=site_dim, min_count=1)
+    denominator = valid_weights.groupby(region_dim).sum(dim=site_dim)
+
+    return numerator / denominator.where(denominator > 0)
 
 
 def _labels_dataarray(
     *,
     region_labels: Sequence[object],
     entity_coord: xr.DataArray,
-    entity_dim: str,
+    site_dim: str,
     region_dim: str,
 ) -> xr.DataArray:
     if len(region_labels) != entity_coord.size:
         raise ValueError("region_labels must have the same length as the entity dimension")
     return xr.DataArray(
         [str(label) for label in region_labels],
-        dims=(entity_dim,),
-        coords={entity_dim: entity_coord.values},
+        dims=(site_dim,),
+        coords={site_dim: entity_coord.values},
         name=region_dim,
     )
 
@@ -341,28 +310,28 @@ def _weights_dataarray(
     *,
     weights: xr.DataArray | Sequence[float],
     entity_coord: xr.DataArray,
-    entity_dim: str,
+    site_dim: str,
     region_dim: str,
     region_labels: Sequence[object],
 ) -> xr.DataArray:
     if isinstance(weights, xr.DataArray):
-        if weights.dims != (entity_dim,):
-            raise ValueError(f"weights must have dims ({entity_dim!r},)")
+        if weights.dims != (site_dim,):
+            raise ValueError(f"weights must have dims ({site_dim!r},)")
         data = weights.astype(float)
     else:
         if len(weights) != entity_coord.size:
             raise ValueError("weights must have the same length as the entity dimension")
         data = xr.DataArray(
             [float(weight) for weight in weights],
-            dims=(entity_dim,),
-            coords={entity_dim: entity_coord.values},
+            dims=(site_dim,),
+            coords={site_dim: entity_coord.values},
         )
     return data.assign_coords(
         {
             region_dim: _labels_dataarray(
                 region_labels=region_labels,
                 entity_coord=entity_coord,
-                entity_dim=entity_dim,
+                site_dim=site_dim,
                 region_dim=region_dim,
             )
         }
